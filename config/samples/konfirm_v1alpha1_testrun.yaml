@@ -1,0 +1,6 @@
+apiVersion: konfirm.goraft.tech/v1alpha1
+kind: TestRun
+metadata:
+  name: testrun-sample
+spec:
+  # TODO(user): Add fields here

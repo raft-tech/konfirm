@@ -3,4 +3,14 @@ layout:
 - go.kubebuilder.io/v3
 projectName: konfirm
 repo: go.goraft.tech/konfirm
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: goraft.tech
+  group: konfirm
+  kind: TestRun
+  path: go.goraft.tech/konfirm/api/v1alpha1
+  version: v1alpha1
 version: "3"
