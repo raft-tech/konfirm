@@ -1,0 +1,6 @@
+domain: goraft.tech
+layout:
+- go.kubebuilder.io/v3
+projectName: konfirm
+repo: go.goraft.tech/konfirm
+version: "3"
