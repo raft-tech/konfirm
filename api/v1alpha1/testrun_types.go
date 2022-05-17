@@ -17,6 +17,7 @@ limitations under the License.
 package v1alpha1
 
 import (
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -25,18 +26,20 @@ import (
 
 // TestRunSpec defines the desired state of TestRun
 type TestRunSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-
-	// Foo is an example field of TestRun. Edit testrun_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
+	Template v1.PodTemplateSpec `json:"template"`
 }
 
 // TestRunStatus defines the observed state of TestRun
 type TestRunStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	Phase Phase `json:"phase"`
+	Result Result `json:"result"`
 }
+
+//+kubebuilder:validation:Enum=Unknown;Waiting;Running;Completed
+type Phase string
+
+//+kubebuilder:validation:Enum=Unknown;Pending;TimedOut;Passed;Failed
+type Result string
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
