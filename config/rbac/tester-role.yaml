@@ -7,32 +7,6 @@ rules:
   - apiGroups:
       - konfirm.goraft.tech
     resources:
-      - manualtriggers
-    verbs:
-      - create
-      - delete
-      - get
-      - list
-      - patch
-      - update
-      - watch
-  - apiGroups:
-      - konfirm.goraft.tech
-    resources:
-      - manualtriggers/status
-    verbs:
-      - get
-  - apiGroups:
-      - konfirm.goraft.tech
-    resources:
-      - manualtriggers/trigger
-    verbs:
-      - get
-      - patch
-      - update
-  - apiGroups:
-      - konfirm.goraft.tech
-    resources:
       - tests
     verbs:
       - get
@@ -56,3 +30,11 @@ rules:
       - patch
       - update
       - watch
+  - apiGroups:
+      - konfirm.goraft.tech
+    resources:
+      - testsuites/trigger
+    verbs:
+      - get
+      - patch
+      - update

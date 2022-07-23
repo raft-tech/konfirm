@@ -86,12 +86,11 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "Test")
 		os.Exit(1)
 	}
-	if err = (&controllers.ManualTriggerReconciler{
-		Client:   mgr.GetClient(),
-		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("manualtrigger-controller"),
+	if err = (&controllers.TestSuiteReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "ManualTrigger")
+		setupLog.Error(err, "unable to create controller", "controller", "TestSuite")
 		os.Exit(1)
 	}
 	//+kubebuilder:scaffold:builder

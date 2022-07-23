@@ -14,7 +14,7 @@
  limitations under the License.
 */
 
-package controllers
+package controllers_test
 
 import (
 	"path/filepath"

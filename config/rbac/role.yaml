@@ -26,44 +26,10 @@ rules:
 - apiGroups:
   - konfirm.goraft.tech
   resources:
-  - manualtriggers
-  verbs:
-  - get
-  - list
-  - watch
-- apiGroups:
-  - konfirm.goraft.tech
-  resources:
-  - manualtriggers/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - konfirm.goraft.tech
-  resources:
-  - manualtriggers/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
-  - konfirm.goraft.tech
-  resources:
-  - manualtriggers/trigger
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
-  - konfirm.goraft.tech
-  resources:
   - tests
   verbs:
-  - create
-  - delete
   - get
   - list
-  - patch
-  - update
   - watch
 - apiGroups:
   - konfirm.goraft.tech
@@ -84,6 +50,25 @@ rules:
   resources:
   - testsuites
   verbs:
+  - create
+  - delete
   - get
   - list
+  - patch
+  - update
   - watch
+- apiGroups:
+  - konfirm.goraft.tech
+  resources:
+  - testsuites/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - konfirm.goraft.tech
+  resources:
+  - testsuites/status
+  - testsuites/trigger
+  verbs:
+  - get
+  - patch
+  - update
