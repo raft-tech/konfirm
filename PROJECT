@@ -10,7 +10,24 @@ resources:
   controller: true
   domain: goraft.tech
   group: konfirm
-  kind: TestRun
+  kind: Test
+  path: go.goraft.tech/konfirm/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  domain: goraft.tech
+  group: konfirm
+  kind: TestSuite
+  path: go.goraft.tech/konfirm/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: goraft.tech
+  group: konfirm
+  kind: ManualTrigger
   path: go.goraft.tech/konfirm/api/v1alpha1
   version: v1alpha1
 version: "3"

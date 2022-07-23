@@ -1,0 +1,58 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: konfirm-tester-role
+rules:
+  - apiGroups:
+      - konfirm.goraft.tech
+    resources:
+      - manualtriggers
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - konfirm.goraft.tech
+    resources:
+      - manualtriggers/status
+    verbs:
+      - get
+  - apiGroups:
+      - konfirm.goraft.tech
+    resources:
+      - manualtriggers/trigger
+    verbs:
+      - get
+      - patch
+      - update
+  - apiGroups:
+      - konfirm.goraft.tech
+    resources:
+      - tests
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - konfirm.goraft.tech
+    resources:
+      - tests/status
+    verbs:
+      - get
+  - apiGroups:
+      - konfirm.goraft.tech
+    resources:
+      - testsuites
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch

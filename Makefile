@@ -1,6 +1,8 @@
 
 # Image URL to use all building/pushing image targets
-IMG ?= controller:latest
+IMG ?= konfirm/controller:v0.1.0
+MOCK_IMG ?= konfirm/mock:v0.1.0
+
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.23
 
@@ -41,7 +43,7 @@ help: ## Display this help.
 
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
-	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+	$(CONTROLLER_GEN) rbac:roleName=konfirm-manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
@@ -69,13 +71,29 @@ build: generate fmt vet ## Build manager binary.
 run: manifests generate fmt vet ## Run a controller from your host.
 	go run ./main.go
 
+.PHONY: build-mock
+build-mock:
+	go build -o bin/mock ./cmd/mock
+
 .PHONY: docker-build
 docker-build: test ## Build docker image with the manager.
 	docker build -t ${IMG} .
 
+.PHONY: docker-build-mock
+docker-build-mock: ## Build docker image with the mock
+	docker build -t ${MOCK_IMG} -f ./images/mock.dockerfile .
+
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
 	docker push ${IMG}
+
+.PHONY: kind-push
+kind-push: ## Push manager image to kind cluster
+	kind load docker-image ${IMG}
+
+.PHONY: kind-push-mock
+kind-push-mock: ## Push mock image to kind cluster
+	kind load docker-image ${MOCK_IMG}
 
 ##@ Deployment
 

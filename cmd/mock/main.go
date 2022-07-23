@@ -13,3 +13,17 @@
  See the License for the specific language governing permissions and
  limitations under the License.
 */
+
+package main
+
+import "os"
+
+func main() {
+	exitCode := 0
+	for _, v := range os.Args {
+		if v == "fail" {
+			exitCode = 1
+		}
+	}
+	os.Exit(exitCode)
+}
