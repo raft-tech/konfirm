@@ -41,19 +41,35 @@ type TestSpec struct {
 	Template v1.PodTemplateSpec `json:"template"`
 }
 
-// +kubebuilder:validation:Enum=Pending;Running;Passed;Failed;Unknown
+// +kubebuilder:validation:Enum=Pending;Starting;Running;Passed;Failed;Unknown
 type TestPhase string
+
+func (p *TestPhase) FromPodPhase(phase v1.PodPhase) {
+	switch phase {
+	case v1.PodPending:
+		*p = TestStarting
+	case v1.PodRunning:
+		*p = TestRunning
+	case v1.PodSucceeded:
+		*p = TestPassed
+	case v1.PodFailed:
+		*p = TestFailed
+	default:
+		*p = TestPending
+	}
+}
 
 const (
 	TestPending      TestPhase = "Pending"
+	TestStarting     TestPhase = "Starting"
 	TestRunning      TestPhase = "Running"
-	TestSucceeded    TestPhase = "Succeeded"
+	TestPassed       TestPhase = "Passed"
 	TestFailed       TestPhase = "Failed"
 	TestPhaseUnknown TestPhase = "Unknown"
 )
 
 func (p TestPhase) IsFinal() bool {
-	return p == TestSucceeded || p == TestFailed
+	return p == TestPassed || p == TestFailed
 }
 
 func (p TestPhase) String() string {
@@ -66,11 +82,11 @@ type TestStatus struct {
 	// Current Conditions
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
-	// Phase (Pending, Running, Succeeded, Failed, or Unknown)
+	// Phase (Pending, Starting, Running, Succeeded, Failed, or Unknown)
 	Phase TestPhase `json:"phase,omitempty"`
 
 	// Messages
-	Messages []string `json:"messages,omitempty"`
+	Messages map[string]string `json:"messages,omitempty"`
 }
 
 //+kubebuilder:object:root=true

@@ -32,10 +32,11 @@ const (
 	RunningCondition        = "Running"
 	PassedCondition         = "Passed"
 	podIndexKey             = ".metadata.controller"
-	TestStartedEvent        = "PodCreated"
-	TestErrorEvent          = "ErrorCreatingPod"
+	TestStartingEvent       = "PodCreated"
+	TestRunningEvent        = "PodRunning"
 	TestPassedEvent         = "TestPassed"
 	TestFailedEvent         = "TestFailed"
+	TestErrorEvent          = "ErrorCreatingPod"
 	TestControllerFinalizer = konfirmv1alpha1.GroupName + "/test"
 )
 
@@ -76,8 +77,11 @@ func (r *TestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{}, err
 	}
 	logger.Trace().Info("retrieved test")
+	orig := test.DeepCopy() // Keep a copy of the original for creating a patch
+	test.Status = konfirmv1alpha1.TestStatus{}
 
 	// Retrieve any pods
+	var pod *v1.Pod
 	logger.Trace().Info("getting pods")
 	var pods v1.PodList
 	if err := r.List(ctx, &pods, client.InNamespace(req.Namespace), client.MatchingFields{podIndexKey: req.Name}); err != nil {
@@ -98,66 +102,63 @@ func (r *TestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	}
 
 	// Create a Pod if needed
-	if count := len(pods.Items); count == 0 {
-		logger.Trace().Info("no pods found")
-		if pod, err := r.createTestPod(ctx, req, &test); err == nil {
+	switch l := len(pods.Items); true {
+	case l == 1:
+		pod = &pods.Items[0]
+	case l > 1:
+		logger.V(-1).Info("more than one pod owned by test", "count", l)
+		// Clean up and start over
+		if err := r.deleteTestPods(ctx, pods.Items); err != nil {
+			logger.Error(err, "error cleaning up extraneous pods")
+			return ctrl.Result{}, err
+		}
+		fallthrough
+	default:
+		logger.Trace().Info("creating pod")
+		if p, err := r.createTestPod(ctx, req, &test); err == nil {
 			logger.Info("pod created")
-			r.Recorder.Eventf(&test, "Normal", TestStartedEvent, "created pod %s/%s", pod.Namespace, pod.Name)
+			pod = p
 		} else {
 			logger.Error(err, "error creating pod")
 			r.Recorder.Event(&test, "Warning", TestErrorEvent, "error creating pod")
 			// TODO: If timeout is implemented, set a requeue after
 			return ctrl.Result{}, err
 		}
-	} else {
-		logger.Trace().Info("retrieved pods", "count", count)
 	}
 
 	// Update the test status as needed
-	phase := konfirmv1alpha1.TestPhaseUnknown
-	var messages []string
-	for _, pod := range pods.Items {
-		// If more than one pod exists, we'll use the results of the first observed to have completed
-		switch pod.Status.Phase {
-		case v1.PodRunning:
-			// If a pod is running, the test is running
-			if !phase.IsFinal() {
-				phase = konfirmv1alpha1.TestRunning
+	test.Status.Phase.FromPodPhase(pod.Status.Phase)
+	test.Status.Messages = make(map[string]string)
+	if test.Status.Phase.IsFinal() {
+		for _, status := range pod.Status.ContainerStatuses {
+			if state := status.State.Terminated; state != nil {
+				test.Status.Messages[status.Name] = state.Message
 			}
-		case v1.PodSucceeded:
-			phase = konfirmv1alpha1.TestSucceeded
-		case v1.PodFailed:
-			phase = konfirmv1alpha1.TestFailed
-		}
-		// If the current pod either Succeeded or Failed, retrieve termination messages and exit the loop
-		if phase.IsFinal() {
-			for _, status := range pod.Status.ContainerStatuses {
-				if state := status.State.Terminated; state != nil {
-					messages = append(messages, state.Message)
-				}
-			}
-			break
 		}
 	}
-	if phase != konfirmv1alpha1.TestPhaseUnknown && phase != test.Status.Phase {
-		logger.Info("updating status", "newPhase", phase)
-		if err := r.Client.Status().Update(ctx, &test); err != nil {
-			logger.Error(err, "error updating status")
-			return ctrl.Result{}, err
-		}
-		// TODO Update conditions
-		switch phase {
-		case konfirmv1alpha1.TestRunning:
-			break
-		case konfirmv1alpha1.TestSucceeded:
-			r.Recorder.Event(&test, "Normal", TestPassedEvent, "Test passed")
-		case konfirmv1alpha1.TestFailed:
-			r.Recorder.Event(&test, "Warning", TestFailedEvent, "Test failed")
-		}
-		// TODO Apply retention policy
+	logger.Trace().Info("patching status")
+	err := r.Client.Status().Patch(ctx, &test, client.MergeFrom(orig))
+	if err == nil {
+		logger.Info("status patched", "phase", test.Status.Phase)
+	} else {
+		logger.Error(err, "error patching status")
 	}
 
-	return ctrl.Result{}, nil
+	// Record the appropriate event
+	if orig.Status.Phase != test.Status.Phase {
+		switch test.Status.Phase {
+		case konfirmv1alpha1.TestStarting:
+			r.Recorder.Eventf(&test, "Normal", TestStartingEvent, "pod %s/%s is pending", pod.Namespace, pod.Name)
+		case konfirmv1alpha1.TestRunning:
+			r.Recorder.Eventf(&test, "Normal", TestRunningEvent, "pod %s/%s is running", pod.Namespace, pod.Name)
+		case konfirmv1alpha1.TestPassed:
+			r.Recorder.Eventf(&test, "Normal", TestPassedEvent, "pod %s/%s succeeded", pod.Namespace, pod.Name)
+		case konfirmv1alpha1.TestFailed:
+			r.Recorder.Eventf(&test, "Warning", TestFailedEvent, "pod %s/%s failed", pod.Namespace, pod.Name)
+		}
+	}
+
+	return ctrl.Result{}, err
 }
 
 func (r *TestReconciler) createTestPod(ctx context.Context, req ctrl.Request, test *konfirmv1alpha1.Test) (*v1.Pod, error) {

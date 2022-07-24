@@ -30,7 +30,7 @@ import (
 var _ = Describe("Test Controller", func() {
 
 	const (
-		timeout              = "100ms"
+		timeout              = "500ms"
 		ownerDeleteFinalizer = "konfirm.go-raft.tech/fake"
 	)
 
@@ -39,7 +39,25 @@ var _ = Describe("Test Controller", func() {
 		test *konfirmv1alpha1.Test
 	)
 
-	// Pretest set up
+	// Helper function for retrieving a Test's pods
+	var getPods = func() ([]v1.Pod, error) {
+		var pods []v1.Pod
+		var err error
+		var podList v1.PodList
+		if err = k8sClient.List(ctx, &podList, client.InNamespace(test.Namespace)); err == nil {
+			for _, p := range podList.Items {
+				for _, o := range p.GetOwnerReferences() {
+					if o.APIVersion == konfirmv1alpha1.GroupVersion.String() &&
+						o.Kind == "Test" &&
+						o.Name == test.Name {
+						pods = append(pods, p)
+					}
+				}
+			}
+		}
+		return pods, err
+	}
+
 	BeforeEach(func() {
 		ctx = context.Background()
 		test = &konfirmv1alpha1.Test{
@@ -70,7 +88,9 @@ var _ = Describe("Test Controller", func() {
 	})
 
 	AfterEach(func() {
-		Expect(func() error { // Remove the fake finalizer, which mocks blockOwnerDeletion behavior
+
+		// Remove the fake finalizer, which mocks blockOwnerDeletion behavior
+		Expect(func() error {
 			orig := test.DeepCopy()
 			test.Finalizers = []string{}
 			for _, f := range orig.GetFinalizers() {
@@ -80,10 +100,6 @@ var _ = Describe("Test Controller", func() {
 			}
 			return k8sClient.Patch(ctx, test, client.MergeFrom(orig))
 		}()).NotTo(HaveOccurred())
-	})
-
-	// Pods and Tests should be cleaned up
-	AfterEach(func() {
 
 		// All pods are gone
 		Eventually(func() ([]v1.Pod, error) {
@@ -128,17 +144,124 @@ var _ = Describe("Test Controller", func() {
 		})
 	})
 
-	Context("a Test exists", func() {
+	Context("a Test was created", func() {
 
-		BeforeEach(func() {
+		// Create the Test and, optionally, set the associated Pod's phase
+		var podPhase = v1.PodPending
+		JustBeforeEach(func() {
 			Expect(k8sClient.Create(ctx, test)).NotTo(HaveOccurred())
+			if podPhase != v1.PodPending {
+				Eventually(func() bool {
+					ok := false
+					if pods, err := getPods(); err == nil && len(pods) == 1 {
+						pod := &pods[0]
+						orig := pod.DeepCopy()
+						pod.Status.Phase = podPhase
+						ok = k8sClient.Status().Patch(ctx, pod, client.MergeFrom(orig)) == nil
+					}
+					return ok
+				}, timeout).Should(BeTrue())
+			}
 		})
 
 		AfterEach(func() {
 			Expect(k8sClient.Delete(ctx, test)).NotTo(HaveOccurred())
-			Eventually(func() bool {
-				return apierrors.IsNotFound(k8sClient.Get(ctx, client.ObjectKeyFromObject(test), &konfirmv1alpha1.Test{}))
-			}, timeout).Should(BeTrue())
 		})
+
+		It("should reach the Starting phase", func() {
+			Eventually(func() (konfirmv1alpha1.TestPhase, error) {
+				var phase = konfirmv1alpha1.TestPhaseUnknown
+				var err error
+				if err = k8sClient.Get(ctx, client.ObjectKeyFromObject(test), test); err == nil {
+					phase = test.Status.Phase
+				}
+				return phase, err
+			}, timeout).Should(Equal(konfirmv1alpha1.TestStarting), "test did not reach the Starting phase")
+		})
+
+		When("a Test's pod is Running", func() {
+
+			BeforeEach(func() {
+				podPhase = v1.PodRunning
+			})
+
+			It("should reach the Running phase", func() {
+				Eventually(func() (konfirmv1alpha1.TestPhase, error) {
+					phase := konfirmv1alpha1.TestPhaseUnknown
+					err := k8sClient.Get(ctx, client.ObjectKeyFromObject(test), test)
+					if err == nil {
+						phase = test.Status.Phase
+					}
+					return phase, err
+				}, timeout).Should(Equal(konfirmv1alpha1.TestRunning), "test did not reach the Running phase")
+			})
+		})
+
+		Context("container statuses are set", func() {
+
+			var (
+				containerStatuses = []v1.ContainerStatus{
+					{
+						Name: "main",
+						State: v1.ContainerState{
+							Terminated: &v1.ContainerStateTerminated{
+								ExitCode: 1,
+								Message:  "Of all the things I've lost I miss my mind the most. --Ozzy Osbourne",
+							},
+						},
+					},
+				}
+			)
+
+			JustBeforeEach(func() {
+				Eventually(func() bool {
+					ok := false
+					if pods, err := getPods(); err == nil && len(pods) == 1 {
+						pod := &pods[0]
+						orig := pod.DeepCopy()
+						pod.Status.ContainerStatuses = containerStatuses
+						ok = k8sClient.Status().Patch(ctx, pod, client.MergeFrom(orig)) == nil
+					}
+					return ok
+				}).Should(BeTrue())
+			})
+
+			When("a Test's pod Succeeded", func() {
+
+				BeforeEach(func() {
+					podPhase = v1.PodSucceeded
+				})
+
+				It("should reach the Passed phase", func() {
+					Eventually(func() (konfirmv1alpha1.TestPhase, error) {
+						phase := konfirmv1alpha1.TestPhaseUnknown
+						err := k8sClient.Get(ctx, client.ObjectKeyFromObject(test), test)
+						if err == nil {
+							phase = test.Status.Phase
+						}
+						return phase, err
+					}, timeout).Should(Equal(konfirmv1alpha1.TestPassed), "test did not reach the Passed phase")
+				})
+			})
+
+			When("a Test's pod Failed", func() {
+
+				BeforeEach(func() {
+					podPhase = v1.PodFailed
+				})
+
+				It("should reach the Failed phase", func() {
+					Eventually(func() (konfirmv1alpha1.TestPhase, error) {
+						phase := konfirmv1alpha1.TestPhaseUnknown
+						err := k8sClient.Get(ctx, client.ObjectKeyFromObject(test), test)
+						if err == nil {
+							phase = test.Status.Phase
+						}
+						return phase, err
+					}, timeout).Should(Equal(konfirmv1alpha1.TestFailed), "test did not reach the Failed phase")
+				})
+			})
+		})
+
 	})
 })

@@ -113,8 +113,10 @@ func (in *TestStatus) DeepCopyInto(out *TestStatus) {
 	}
 	if in.Messages != nil {
 		in, out := &in.Messages, &out.Messages
-		*out = make([]string, len(*in))
-		copy(*out, *in)
+		*out = make(map[string]string, len(*in))
+		for key, val := range *in {
+			(*out)[key] = val
+		}
 	}
 }
 

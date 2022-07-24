@@ -7205,14 +7205,16 @@ spec:
                   type: object
                 type: array
               messages:
-                description: Messages
-                items:
+                additionalProperties:
                   type: string
-                type: array
+                description: Messages
+                type: object
               phase:
-                description: Phase (Pending, Running, Succeeded, Failed, or Unknown)
+                description: Phase (Pending, Starting, Running, Succeeded, Failed,
+                  or Unknown)
                 enum:
                 - Pending
+                - Starting
                 - Running
                 - Passed
                 - Failed
