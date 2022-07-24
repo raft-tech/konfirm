@@ -18,9 +18,11 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 	konfirmv1alpha1 "github.com/raft-tech/konfirm/api/v1alpha1"
 	"github.com/raft-tech/konfirm/logging"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
@@ -29,8 +31,8 @@ import (
 )
 
 const (
-	RunningCondition        = "Running"
-	PassedCondition         = "Passed"
+	PodCreatedCondition     = "PodCreated"
+	TestCompletedCondition  = "TestCompleted"
 	podIndexKey             = ".metadata.controller"
 	TestStartingEvent       = "PodCreated"
 	TestRunningEvent        = "PodRunning"
@@ -76,9 +78,14 @@ func (r *TestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		}
 		return ctrl.Result{}, err
 	}
+	logger = logger.WithValues("generation", test.Generation)
 	logger.Trace().Info("retrieved test")
 	orig := test.DeepCopy() // Keep a copy of the original for creating a patch
-	test.Status = konfirmv1alpha1.TestStatus{}
+	test.Status = konfirmv1alpha1.TestStatus{
+		Conditions: orig.Status.Conditions,
+		Phase:      konfirmv1alpha1.TestPhaseUnknown,
+		Messages:   make(map[string]string),
+	}
 
 	// Retrieve any pods
 	var pod *v1.Pod
@@ -128,14 +135,36 @@ func (r *TestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 
 	// Update the test status as needed
 	test.Status.Phase.FromPodPhase(pod.Status.Phase)
-	test.Status.Messages = make(map[string]string)
+	meta.SetStatusCondition(&test.Status.Conditions, metav1.Condition{
+		Type:               PodCreatedCondition,
+		Status:             "True",
+		ObservedGeneration: test.Generation,
+		Reason:             "PodCreated",
+		Message:            fmt.Sprintf("pod %s/%s was created", pod.Namespace, pod.Name),
+	})
 	if test.Status.Phase.IsFinal() {
 		for _, status := range pod.Status.ContainerStatuses {
 			if state := status.State.Terminated; state != nil {
 				test.Status.Messages[status.Name] = state.Message
 			}
 		}
+		meta.SetStatusCondition(&test.Status.Conditions, metav1.Condition{
+			Type:               TestCompletedCondition,
+			Status:             "True",
+			ObservedGeneration: test.Generation,
+			Reason:             "PodComplete",
+			Message:            fmt.Sprintf("pod %s/%s has completed", pod.Namespace, pod.Name),
+		})
+	} else {
+		meta.SetStatusCondition(&test.Status.Conditions, metav1.Condition{
+			Type:               TestCompletedCondition,
+			Status:             "False",
+			ObservedGeneration: test.Generation,
+			Reason:             "PodNotComplete",
+			Message:            fmt.Sprintf("pod %s/%s has not completed", pod.Namespace, pod.Name),
+		})
 	}
+
 	logger.Trace().Info("patching status")
 	err := r.Client.Status().Patch(ctx, &test, client.MergeFrom(orig))
 	if err == nil {

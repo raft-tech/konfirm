@@ -21,6 +21,7 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	konfirmv1alpha1 "github.com/raft-tech/konfirm/api/v1alpha1"
+	"github.com/raft-tech/konfirm/controllers"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -169,14 +170,22 @@ var _ = Describe("Test Controller", func() {
 		})
 
 		It("should reach the Starting phase", func() {
-			Eventually(func() (konfirmv1alpha1.TestPhase, error) {
-				var phase = konfirmv1alpha1.TestPhaseUnknown
-				var err error
-				if err = k8sClient.Get(ctx, client.ObjectKeyFromObject(test), test); err == nil {
-					phase = test.Status.Phase
-				}
-				return phase, err
-			}, timeout).Should(Equal(konfirmv1alpha1.TestStarting), "test did not reach the Starting phase")
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(test), test)).ToNot(HaveOccurred())
+				g.Expect(test.Status.Phase).To(Equal(konfirmv1alpha1.TestStarting), "test did not reach the Starting phase")
+				g.Expect(test.Status.Conditions).To(And(
+					HaveValue(And(
+						HaveField("Type", controllers.PodCreatedCondition),
+						HaveField("Status", "True"),
+						HaveField("Reason", "PodCreated"),
+					)),
+					HaveValue(And(
+						HaveField("Type", controllers.TestCompletedCondition),
+						HaveField("Status", "False"),
+						HaveField("Reason", "PodNotCompleted"),
+					)),
+				), "have the expected conditions")
+			}, timeout)
 		})
 
 		When("a Test's pod is Running", func() {
@@ -186,14 +195,22 @@ var _ = Describe("Test Controller", func() {
 			})
 
 			It("should reach the Running phase", func() {
-				Eventually(func() (konfirmv1alpha1.TestPhase, error) {
-					phase := konfirmv1alpha1.TestPhaseUnknown
-					err := k8sClient.Get(ctx, client.ObjectKeyFromObject(test), test)
-					if err == nil {
-						phase = test.Status.Phase
-					}
-					return phase, err
-				}, timeout).Should(Equal(konfirmv1alpha1.TestRunning), "test did not reach the Running phase")
+				Eventually(func(g Gomega) {
+					g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(test), test)).ToNot(HaveOccurred())
+					g.Expect(test.Status.Phase).To(Equal(konfirmv1alpha1.TestRunning), "test did not reach the Running phase")
+					g.Expect(test.Status.Conditions).To(And(
+						HaveValue(And(
+							HaveField("Type", controllers.PodCreatedCondition),
+							HaveField("Status", "True"),
+							HaveField("Reason", "PodCreated"),
+						)),
+						HaveValue(And(
+							HaveField("Type", controllers.TestCompletedCondition),
+							HaveField("Status", "False"),
+							HaveField("Reason", "PodNotCompleted"),
+						)),
+					), "have the expected conditions")
+				}, timeout)
 			})
 		})
 
@@ -232,15 +249,26 @@ var _ = Describe("Test Controller", func() {
 					podPhase = v1.PodSucceeded
 				})
 
-				It("should reach the Passed phase", func() {
-					Eventually(func() (konfirmv1alpha1.TestPhase, error) {
-						phase := konfirmv1alpha1.TestPhaseUnknown
-						err := k8sClient.Get(ctx, client.ObjectKeyFromObject(test), test)
-						if err == nil {
-							phase = test.Status.Phase
-						}
-						return phase, err
-					}, timeout).Should(Equal(konfirmv1alpha1.TestPassed), "test did not reach the Passed phase")
+				It("the Test should be Passed", func() {
+					Eventually(func(g Gomega) {
+						g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(test), test)).ToNot(HaveOccurred())
+						g.Expect(test.Status.Phase).To(Equal(konfirmv1alpha1.TestPassed), "test did not reach the Passed phase")
+						g.Expect(test.Status.Messages).To(Equal(map[string]string{
+							"main": "Of all the things I've lost I miss my mind the most. --Ozzy Osbourne",
+						}))
+						g.Expect(test.Status.Conditions).To(And(
+							HaveValue(And(
+								HaveField("Type", controllers.PodCreatedCondition),
+								HaveField("Status", "True"),
+								HaveField("Reason", "PodCreated"),
+							)),
+							HaveValue(And(
+								HaveField("Type", controllers.TestCompletedCondition),
+								HaveField("Status", "True"),
+								HaveField("Reason", "PodCompleted"),
+							)),
+						), "have the expected conditions")
+					}, timeout)
 				})
 			})
 
@@ -250,18 +278,28 @@ var _ = Describe("Test Controller", func() {
 					podPhase = v1.PodFailed
 				})
 
-				It("should reach the Failed phase", func() {
-					Eventually(func() (konfirmv1alpha1.TestPhase, error) {
-						phase := konfirmv1alpha1.TestPhaseUnknown
-						err := k8sClient.Get(ctx, client.ObjectKeyFromObject(test), test)
-						if err == nil {
-							phase = test.Status.Phase
-						}
-						return phase, err
-					}, timeout).Should(Equal(konfirmv1alpha1.TestFailed), "test did not reach the Failed phase")
+				It("the test should should be Failed", func() {
+					Eventually(func(g Gomega) {
+						g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(test), test)).ToNot(HaveOccurred())
+						g.Expect(test.Status.Phase).To(Equal(konfirmv1alpha1.TestFailed), "test did not reach the Failed phase")
+						g.Expect(test.Status.Messages).To(Equal(map[string]string{
+							"main": "Of all the things I've lost I miss my mind the most. --Ozzy Osbourne",
+						}))
+						g.Expect(test.Status.Conditions).To(And(
+							HaveValue(And(
+								HaveField("Type", controllers.PodCreatedCondition),
+								HaveField("Status", "True"),
+								HaveField("Reason", "PodCreated"),
+							)),
+							HaveValue(And(
+								HaveField("Type", controllers.TestCompletedCondition),
+								HaveField("Status", "True"),
+								HaveField("Reason", "PodCompleted"),
+							)),
+						), "have the expected conditions")
+					}, timeout)
 				})
 			})
 		})
-
 	})
 })
