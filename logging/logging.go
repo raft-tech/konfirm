@@ -51,9 +51,9 @@ func (l *Logger) Trace() logr.Logger {
 }
 
 func (l *Logger) WithValues(keysAndValues ...interface{}) *Logger {
-	return NewLogger(l.Logger.WithValues(keysAndValues))
+	return NewLogger(l.Logger.WithValues(keysAndValues...))
 }
 
 func FromContext(ctx context.Context, keysAndValues ...interface{}) *Logger {
-	return NewLogger(logr.FromContextOrDiscard(ctx))
+	return NewLogger(logr.FromContextOrDiscard(ctx).WithValues(keysAndValues...))
 }

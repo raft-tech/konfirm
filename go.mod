@@ -1,4 +1,4 @@
-module go.goraft.tech/konfirm
+module github.com/raft-tech/konfirm
 
 go 1.18
 

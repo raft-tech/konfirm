@@ -17,7 +17,11 @@
 package controllers_test
 
 import (
+	"context"
+	"github.com/raft-tech/konfirm/controllers"
+	"go.uber.org/zap/zapcore"
 	"path/filepath"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"testing"
 
 	. "github.com/onsi/ginkgo"
@@ -30,16 +34,20 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	konfirmv1alpha1 "go.goraft.tech/konfirm/api/v1alpha1"
+	konfirmv1alpha1 "github.com/raft-tech/konfirm/api/v1alpha1"
 	//+kubebuilder:scaffold:imports
 )
 
 // These tests use Ginkgo (BDD-style Go testing framework). Refer to
 // http://onsi.github.io/ginkgo/ to learn more about Ginkgo.
 
-var cfg *rest.Config
-var k8sClient client.Client
-var testEnv *envtest.Environment
+var (
+	cfg       *rest.Config
+	k8sClient client.Client
+	testEnv   *envtest.Environment
+	mgrCtx    context.Context
+	mgrCancel context.CancelFunc
+)
 
 func TestAPIs(t *testing.T) {
 	RegisterFailHandler(Fail)
@@ -50,7 +58,7 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
+	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true), zap.Level(zapcore.DebugLevel)))
 
 	By("bootstrapping test environment")
 	testEnv = &envtest.Environment{
@@ -73,9 +81,34 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(k8sClient).NotTo(BeNil())
 
+	// Create a manager
+	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
+		Scheme: scheme.Scheme,
+	})
+	Expect(err).ToNot(HaveOccurred())
+
+	// Set up TestController
+	err = (&controllers.TestReconciler{
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("test-controller"),
+	}).SetupWithManager(mgr)
+	Expect(err).ToNot(HaveOccurred())
+
+	// TODO Add TestSuiteController to test manager
+
+	// Start manager
+	mgrCtx, mgrCancel = context.WithCancel(context.TODO())
+	go func() {
+		defer GinkgoRecover()
+		err = mgr.Start(mgrCtx)
+		Expect(err).NotTo(HaveOccurred())
+	}()
+
 }, 60)
 
 var _ = AfterSuite(func() {
+	mgrCancel() // Stops mgr started in BeforeSuite
 	By("tearing down the test environment")
 	err := testEnv.Stop()
 	Expect(err).NotTo(HaveOccurred())

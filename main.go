@@ -31,8 +31,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	konfirmv1alpha1 "go.goraft.tech/konfirm/api/v1alpha1"
-	"go.goraft.tech/konfirm/controllers"
+	konfirmv1alpha1 "github.com/raft-tech/konfirm/api/v1alpha1"
+	"github.com/raft-tech/konfirm/controllers"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -87,8 +87,9 @@ func main() {
 		os.Exit(1)
 	}
 	if err = (&controllers.TestSuiteReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("testsuite-controller"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "TestSuite")
 		os.Exit(1)

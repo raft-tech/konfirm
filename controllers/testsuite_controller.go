@@ -18,6 +18,9 @@ package controllers
 
 import (
 	"context"
+	konfirmv1alpha1 "github.com/raft-tech/konfirm/api/v1alpha1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/record"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -25,10 +28,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
+const (
+	testIndexKey = ".metadata.controller"
+)
+
 // TestSuiteReconciler reconciles a TestSuite object
 type TestSuiteReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme   *runtime.Scheme
+	Recorder record.EventRecorder
 }
 
 //+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=testsuites,verbs=get;list;watch;create;update;patch;delete
@@ -37,10 +45,6 @@ type TestSuiteReconciler struct {
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the TestSuite object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
 //
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.11.2/pkg/reconcile
@@ -54,8 +58,28 @@ func (r *TestSuiteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *TestSuiteReconciler) SetupWithManager(mgr ctrl.Manager) error {
+
+	// Set up an indexer to reconcile on changes to controlled tests
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &konfirmv1alpha1.Test{}, testIndexKey, func(rawObj client.Object) []string {
+		// Get the test and owner
+		test := rawObj.(*konfirmv1alpha1.Test)
+		owner := metav1.GetControllerOf(test)
+		if owner == nil {
+			return nil
+		}
+		// Return the owner if it's a TestSuite
+		if owner.APIVersion == konfirmv1alpha1.GroupVersion.String() && owner.Kind == "TestSuite" {
+			return []string{owner.Name}
+		} else {
+			return nil
+		}
+	}); err != nil {
+		return err
+	}
+
 	return ctrl.NewControllerManagedBy(mgr).
 		// Uncomment the following line adding a pointer to an instance of the controlled resource as an argument
-		// For().
+		For(&konfirmv1alpha1.TestSuite{}).
+		Owns(&konfirmv1alpha1.Test{}).
 		Complete(r)
 }

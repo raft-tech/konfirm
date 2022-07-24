@@ -24,8 +24,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/scheme"
 )
 
+const GroupName = "konfirm.goraft.tech"
+
 var (
-	GroupName = "konfirm.goraft.tech"
 
 	// GroupVersion is group version used to register these objects
 	GroupVersion = schema.GroupVersion{Group: GroupName, Version: "v1alpha1"}
