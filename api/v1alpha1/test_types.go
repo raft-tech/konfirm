@@ -72,6 +72,10 @@ func (p TestPhase) IsFinal() bool {
 	return p == TestPassed || p == TestFailed
 }
 
+func (p TestPhase) IsSuccess() bool {
+	return p == TestPassed
+}
+
 func (p TestPhase) String() string {
 	return string(p)
 }
@@ -83,6 +87,7 @@ type TestStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// Phase (Pending, Starting, Running, Succeeded, Failed, or Unknown)
+	// +kubebuilder:default=Pending
 	Phase TestPhase `json:"phase,omitempty"`
 
 	// Messages

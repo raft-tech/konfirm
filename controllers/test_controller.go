@@ -80,15 +80,8 @@ func (r *TestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	}
 	logger = logger.WithValues("generation", test.Generation)
 	logger.Trace().Info("retrieved test")
-	orig := test.DeepCopy() // Keep a copy of the original for creating a patch
-	test.Status = konfirmv1alpha1.TestStatus{
-		Conditions: orig.Status.Conditions,
-		Phase:      konfirmv1alpha1.TestPhaseUnknown,
-		Messages:   make(map[string]string),
-	}
 
-	// Retrieve any pods
-	var pod *v1.Pod
+	// Retrieve any controlled pods
 	logger.Trace().Info("getting pods")
 	var pods v1.PodList
 	if err := r.List(ctx, &pods, client.InNamespace(req.Namespace), client.MatchingFields{podIndexKey: req.Name}); err != nil {
@@ -109,31 +102,40 @@ func (r *TestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	}
 
 	// Create a Pod if needed
+	var pod *v1.Pod
 	switch l := len(pods.Items); true {
 	case l == 1:
 		pod = &pods.Items[0]
 	case l > 1:
 		logger.V(-1).Info("more than one pod owned by test", "count", l)
 		// Clean up and start over
-		if err := r.deleteTestPods(ctx, pods.Items); err != nil {
-			logger.Error(err, "error cleaning up extraneous pods")
+		if !test.Status.Phase.IsFinal() {
+			err := r.deleteTestPods(ctx, pods.Items)
+			if err != nil {
+				logger.Error(err, "error cleaning up extraneous pods")
+			}
 			return ctrl.Result{}, err
 		}
-		fallthrough
 	default:
-		logger.Trace().Info("creating pod")
-		if p, err := r.createTestPod(ctx, req, &test); err == nil {
-			logger.Info("pod created")
-			pod = p
+		if !test.Status.Phase.IsFinal() {
+			logger.Trace().Info("creating pod")
+			if p, err := r.createTestPod(ctx, req, &test); err == nil {
+				logger.Info("pod created")
+				pod = p
+			} else {
+				logger.Error(err, "error creating pod")
+				r.Recorder.Event(&test, "Warning", TestErrorEvent, "error creating pod")
+				// TODO: If timeout is implemented, set a requeue after
+				return ctrl.Result{}, err
+			}
 		} else {
-			logger.Error(err, "error creating pod")
-			r.Recorder.Event(&test, "Warning", TestErrorEvent, "error creating pod")
-			// TODO: If timeout is implemented, set a requeue after
-			return ctrl.Result{}, err
+			// Test Phase is final and pod has been removed, nothing more to do here
+			return ctrl.Result{}, nil
 		}
 	}
 
 	// Update the test status as needed
+	orig := test.DeepCopy()
 	test.Status.Phase.FromPodPhase(pod.Status.Phase)
 	meta.SetStatusCondition(&test.Status.Conditions, metav1.Condition{
 		Type:               PodCreatedCondition,
@@ -143,11 +145,6 @@ func (r *TestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		Message:            fmt.Sprintf("pod %s/%s was created", pod.Namespace, pod.Name),
 	})
 	if test.Status.Phase.IsFinal() {
-		for _, status := range pod.Status.ContainerStatuses {
-			if state := status.State.Terminated; state != nil {
-				test.Status.Messages[status.Name] = state.Message
-			}
-		}
 		meta.SetStatusCondition(&test.Status.Conditions, metav1.Condition{
 			Type:               TestCompletedCondition,
 			Status:             "True",
@@ -155,6 +152,12 @@ func (r *TestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 			Reason:             "PodComplete",
 			Message:            fmt.Sprintf("pod %s/%s has completed", pod.Namespace, pod.Name),
 		})
+		test.Status.Messages = make(map[string]string)
+		for _, status := range pod.Status.ContainerStatuses {
+			if state := status.State.Terminated; state != nil {
+				test.Status.Messages[status.Name] = state.Message
+			}
+		}
 	} else {
 		meta.SetStatusCondition(&test.Status.Conditions, metav1.Condition{
 			Type:               TestCompletedCondition,
@@ -184,6 +187,26 @@ func (r *TestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 			r.Recorder.Eventf(&test, "Normal", TestPassedEvent, "pod %s/%s succeeded", pod.Namespace, pod.Name)
 		case konfirmv1alpha1.TestFailed:
 			r.Recorder.Eventf(&test, "Warning", TestFailedEvent, "pod %s/%s failed", pod.Namespace, pod.Name)
+		}
+	}
+
+	// Handle retention by policy
+	if test.Status.Phase.IsFinal() {
+		switch test.Spec.RetentionPolicy {
+		case konfirmv1alpha1.RetainOnFailure:
+			if test.Status.Phase == konfirmv1alpha1.TestFailed {
+				logger.Info("retaining test pods due to RetainOnFailure")
+				break
+			}
+			fallthrough
+		case konfirmv1alpha1.RetainNever:
+			if err := r.deleteTestPods(ctx, pods.Items); err == nil {
+				logger.Info("pods removed based on retention policy")
+			} else {
+				logger.Error(err, "error cleaning up pods after test completion")
+			}
+		case konfirmv1alpha1.RetainAlways:
+			logger.Info("retaining test pods due to RetainAlways")
 		}
 	}
 

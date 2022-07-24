@@ -249,7 +249,7 @@ var _ = Describe("Test Controller", func() {
 					podPhase = v1.PodSucceeded
 				})
 
-				It("the Test should be Passed", func() {
+				It("it should progress the Test to Passed", func() {
 					Eventually(func(g Gomega) {
 						g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(test), test)).ToNot(HaveOccurred())
 						g.Expect(test.Status.Phase).To(Equal(konfirmv1alpha1.TestPassed), "test did not reach the Passed phase")
@@ -270,6 +270,35 @@ var _ = Describe("Test Controller", func() {
 						), "have the expected conditions")
 					}, timeout)
 				})
+
+				It("it should delete the pods", func() {
+					Eventually(getPods).Should(BeEmpty())
+				})
+
+				When("retention policy is Never", func() {
+
+					BeforeEach(func() {
+						test.Spec.RetentionPolicy = konfirmv1alpha1.RetainNever
+					})
+
+					It("it should delete the pods", func() {
+						Eventually(getPods).Should(BeEmpty())
+					})
+				})
+
+				When("retention policy is Always", func() {
+					BeforeEach(func() {
+						test.Spec.RetentionPolicy = konfirmv1alpha1.RetainNever
+					})
+
+					It("it should retain the pod", func() {
+						Eventually(func(g Gomega) {
+							g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(test), test)).ToNot(HaveOccurred())
+							g.Expect(test.Status.Phase).To(Equal(konfirmv1alpha1.TestPassed), "test did not reach the Passed phase")
+							g.Expect(getPods()).To(HaveLen(1))
+						}, timeout)
+					})
+				})
 			})
 
 			When("a Test's pod Failed", func() {
@@ -278,7 +307,7 @@ var _ = Describe("Test Controller", func() {
 					podPhase = v1.PodFailed
 				})
 
-				It("the test should should be Failed", func() {
+				It("it should progress the Test to Failed", func() {
 					Eventually(func(g Gomega) {
 						g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(test), test)).ToNot(HaveOccurred())
 						g.Expect(test.Status.Phase).To(Equal(konfirmv1alpha1.TestFailed), "test did not reach the Failed phase")
@@ -298,6 +327,39 @@ var _ = Describe("Test Controller", func() {
 							)),
 						), "have the expected conditions")
 					}, timeout)
+				})
+
+				It("it should retain the pod", func() {
+					Eventually(func(g Gomega) {
+						g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(test), test)).ToNot(HaveOccurred())
+						g.Expect(test.Status.Phase).To(Equal(konfirmv1alpha1.TestFailed), "test did not reach the Failed phase")
+						g.Expect(getPods()).To(HaveLen(1))
+					}, timeout)
+				})
+
+				When("retention policy is Never", func() {
+
+					BeforeEach(func() {
+						test.Spec.RetentionPolicy = konfirmv1alpha1.RetainNever
+					})
+
+					It("it should delete the pods", func() {
+						Eventually(getPods).Should(BeEmpty())
+					})
+				})
+
+				When("retention policy is Always", func() {
+					BeforeEach(func() {
+						test.Spec.RetentionPolicy = konfirmv1alpha1.RetainNever
+					})
+
+					It("it should retain the pod", func() {
+						Eventually(func(g Gomega) {
+							g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(test), test)).ToNot(HaveOccurred())
+							g.Expect(test.Status.Phase).To(Equal(konfirmv1alpha1.TestPassed), "test did not reach the Passed phase")
+							g.Expect(getPods()).To(HaveLen(1))
+						}, timeout)
+					})
 				})
 			})
 		})

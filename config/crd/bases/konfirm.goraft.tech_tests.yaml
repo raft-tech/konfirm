@@ -7210,6 +7210,7 @@ spec:
                 description: Messages
                 type: object
               phase:
+                default: Pending
                 description: Phase (Pending, Starting, Running, Succeeded, Failed,
                   or Unknown)
                 enum:

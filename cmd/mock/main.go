@@ -16,14 +16,30 @@
 
 package main
 
-import "os"
+import (
+	"io/ioutil"
+	"os"
+)
 
 func main() {
 	exitCode := 0
-	for _, v := range os.Args {
-		if v == "fail" {
+	argv := os.Args
+	var message string
+	switch argc := len(argv); true {
+	case argc == 1:
+		if argv[0] == "--fail" {
+			exitCode = 1
+		} else {
+			message = argv[0]
+		}
+	case argc == 2:
+		if argv[0] == "--fail" {
 			exitCode = 1
 		}
+		message = argv[1]
+	}
+	if message != "" {
+		_ = ioutil.WriteFile("/dev/termination-log", []byte("message"), 0644)
 	}
 	os.Exit(exitCode)
 }
