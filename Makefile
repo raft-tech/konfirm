@@ -43,7 +43,7 @@ help: ## Display this help.
 
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
-	$(CONTROLLER_GEN) rbac:roleName=konfirm-manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
@@ -87,13 +87,23 @@ docker-build-mock: ## Build docker image with the mock
 docker-push: ## Push docker image with the manager.
 	docker push ${IMG}
 
+##@ Kind
+
+.PHONY: kind
+kind:
+	kind create cluster --name="konfirm"
+
 .PHONY: kind-push
-kind-push: ## Push manager image to kind cluster
-	kind load docker-image ${IMG}
+kind-push: docker-build ## Push manager image to kind cluster
+	kind load docker-image ${IMG} --name="konfirm"
 
 .PHONY: kind-push-mock
-kind-push-mock: ## Push mock image to kind cluster
-	kind load docker-image ${MOCK_IMG}
+kind-push-mock: docker-build-mock ## Push mock image to kind cluster
+	kind load docker-image ${MOCK_IMG} --name="konfirm"
+
+.PHONY: kind-deploy
+kind-deploy: kind kind-push kind-push-mock install deploy
+	kubectl apply -f config/samples
 
 ##@ Deployment
 

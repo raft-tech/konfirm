@@ -39,7 +39,7 @@ const (
 	TestPassedEvent         = "TestPassed"
 	TestFailedEvent         = "TestFailed"
 	TestErrorEvent          = "ErrorCreatingPod"
-	TestControllerFinalizer = konfirmv1alpha1.GroupName + "/test"
+	TestControllerFinalizer = konfirmv1alpha1.GroupName + "/test-controller"
 )
 
 // TestReconciler reconciles a Test object
@@ -49,12 +49,12 @@ type TestReconciler struct {
 	Recorder record.EventRecorder
 }
 
-//+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=tests,verbs=get;list;watch
+//+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=tests,verbs=get;list;watch;patch
 //+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=tests/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=tests/finalizers,verbs=update
 //+kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=pods/finalizers,verbs=patch
 //+kubebuilder:rbac:groups="",resources=pods/status,verbs=get
+//+kubebuilder:rbac:groups="",resources=events,verbs=create
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -91,19 +91,21 @@ func (r *TestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 
 	// If test is being deleted clean up pods and return
 	if test.DeletionTimestamp != nil {
+
+	}
+
+	// Retrieve or create the pod
+	var pod *v1.Pod
+	switch l := len(pods.Items); true {
+	case test.DeletionTimestamp != nil && l > 0:
 		logger.Trace().Info("deleting pods")
 		err := r.deleteTestPods(ctx, pods.Items)
 		if err == nil {
-			logger.Info("deleted pods")
+			logger.Info("pods deleted")
 		} else {
 			logger.Error(err, "error deleting pod(s)")
 		}
 		return ctrl.Result{}, err
-	}
-
-	// Create a Pod if needed
-	var pod *v1.Pod
-	switch l := len(pods.Items); true {
 	case l == 1:
 		pod = &pods.Items[0]
 	case l > 1:
@@ -116,21 +118,51 @@ func (r *TestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 			}
 			return ctrl.Result{}, err
 		}
-	default:
-		if !test.Status.Phase.IsFinal() {
-			logger.Trace().Info("creating pod")
-			if p, err := r.createTestPod(ctx, req, &test); err == nil {
-				logger.Info("pod created")
-				pod = p
-			} else {
-				logger.Error(err, "error creating pod")
-				r.Recorder.Event(&test, "Warning", TestErrorEvent, "error creating pod")
-				// TODO: If timeout is implemented, set a requeue after
-				return ctrl.Result{}, err
+	case test.Status.Phase.IsFinal() || test.DeletionTimestamp != nil:
+		orig := test.DeepCopy()
+		test.Finalizers = []string{}
+		for _, f := range orig.GetFinalizers() {
+			if f != TestControllerFinalizer {
+				test.Finalizers = append(test.Finalizers, f)
 			}
+		}
+		logger.Trace().Info("patching finalizer")
+		err := r.Client.Patch(ctx, &test, client.MergeFrom(orig))
+		if err == nil {
+			logger.Debug().Info("finalizer removed")
 		} else {
-			// Test Phase is final and pod has been removed, nothing more to do here
-			return ctrl.Result{}, nil
+			logger.Error(err, "error removing Test finalizer")
+		}
+		return ctrl.Result{}, nil
+	default:
+		// Test needs Pod. If finalizer is set, create pods. Otherwise add finalizer
+		hasFinalizer := false
+		for _, f := range test.GetFinalizers() {
+			if f == TestControllerFinalizer {
+				hasFinalizer = true
+				break
+			}
+		}
+		if !hasFinalizer {
+			// Do not create pods until Test has konfirm finalizer
+			orig := test.DeepCopy()
+			test.Finalizers = append(test.Finalizers, TestControllerFinalizer)
+			err := r.Client.Patch(ctx, &test, client.MergeFrom(orig))
+			if err == nil {
+				logger.Debug().Info("added test-controller finalizer")
+			} else {
+				logger.Error(err, "error adding test-controller finalizer")
+			}
+			return ctrl.Result{}, err
+		}
+		logger.Trace().Info("creating pod")
+		if p, err := r.createTestPod(ctx, req, &test); err == nil {
+			logger.Info("pod created", "pod", client.ObjectKeyFromObject(p).String())
+			pod = p
+		} else {
+			logger.Error(err, "error creating pod")
+			r.Recorder.Event(&test, "Warning", TestErrorEvent, "error creating pod")
+			return ctrl.Result{}, err
 		}
 	}
 
@@ -233,6 +265,7 @@ func (r *TestReconciler) createTestPod(ctx context.Context, req ctrl.Request, te
 		},
 	}
 	pod.ObjectMeta.Finalizers = []string{TestControllerFinalizer}
+	pod.Spec.RestartPolicy = v1.RestartPolicyNever
 	return &pod, r.Create(ctx, &pod)
 }
 
@@ -248,15 +281,15 @@ func (r *TestReconciler) deleteTestPods(ctx context.Context, pods []v1.Pod) erro
 				pod.ObjectMeta.Finalizers = append(pod.ObjectMeta.Finalizers, f)
 			}
 		}
-		if err := r.Patch(ctx, &pod, client.MergeFrom(orig)); err != nil {
-			errs.Append(err)
-		}
-
-		// Delete the pod
-		if pod.DeletionTimestamp == nil {
-			if err := r.Delete(ctx, &pod); err != nil {
-				errs.Append(err)
+		if err := r.Patch(ctx, &pod, client.MergeFrom(orig)); err == nil {
+			// Delete the pod
+			if pod.DeletionTimestamp == nil {
+				if err := r.Delete(ctx, &pod); err != nil {
+					errs.Append(err)
+				}
 			}
+		} else {
+			errs.Append(err)
 		}
 	}
 	return errs.Error()

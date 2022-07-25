@@ -3,8 +3,14 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   creationTimestamp: null
-  name: konfirm-manager-role
+  name: manager-role
 rules:
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
 - apiGroups:
   - ""
   resources:
@@ -36,13 +42,8 @@ rules:
   verbs:
   - get
   - list
+  - patch
   - watch
-- apiGroups:
-  - konfirm.goraft.tech
-  resources:
-  - tests/finalizers
-  verbs:
-  - update
 - apiGroups:
   - konfirm.goraft.tech
   resources:

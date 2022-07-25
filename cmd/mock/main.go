@@ -26,20 +26,20 @@ func main() {
 	argv := os.Args
 	var message string
 	switch argc := len(argv); true {
-	case argc == 1:
-		if argv[0] == "--fail" {
+	case argc == 2:
+		if a := argv[1]; a == "--fail" {
 			exitCode = 1
 		} else {
-			message = argv[0]
+			message = a
 		}
-	case argc == 2:
-		if argv[0] == "--fail" {
+	case argc == 3:
+		if argv[1] == "--fail" {
 			exitCode = 1
 		}
-		message = argv[1]
+		message = argv[2]
 	}
 	if message != "" {
-		_ = ioutil.WriteFile("/dev/termination-log", []byte("message"), 0644)
+		_ = ioutil.WriteFile("/dev/termination-log", []byte(message), 0644)
 	}
 	os.Exit(exitCode)
 }

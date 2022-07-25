@@ -31,8 +31,7 @@ import (
 var _ = Describe("Test Controller", func() {
 
 	const (
-		timeout              = "500ms"
-		ownerDeleteFinalizer = "konfirm.go-raft.tech/fake"
+		timeout = "500ms"
 	)
 
 	var (
@@ -69,8 +68,6 @@ var _ = Describe("Test Controller", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "a-test",
 				Namespace: "default",
-				// FIXME: Actually confirm this behavior exists in K8s
-				Finalizers: []string{ownerDeleteFinalizer}, // Mock K8s' native blockOwnerDeletion behavior
 			},
 			Spec: konfirmv1alpha1.TestSpec{
 				RetentionPolicy: konfirmv1alpha1.RetainOnFailure,
@@ -89,18 +86,6 @@ var _ = Describe("Test Controller", func() {
 	})
 
 	AfterEach(func() {
-
-		// Remove the fake finalizer, which mocks blockOwnerDeletion behavior
-		Expect(func() error {
-			orig := test.DeepCopy()
-			test.Finalizers = []string{}
-			for _, f := range orig.GetFinalizers() {
-				if f != ownerDeleteFinalizer {
-					test.Finalizers = append(test.Finalizers, f)
-				}
-			}
-			return k8sClient.Patch(ctx, test, client.MergeFrom(orig))
-		}()).NotTo(HaveOccurred())
 
 		// All pods are gone
 		Eventually(func() ([]v1.Pod, error) {
@@ -129,7 +114,10 @@ var _ = Describe("Test Controller", func() {
 						for _, o := range p.GetOwnerReferences() {
 							if o.Kind == "Test" && o.Name == test.Name {
 								podKey = client.ObjectKeyFromObject(&p)
-								return o.Controller != nil && *o.Controller && *o.BlockOwnerDeletion
+								return o.Controller != nil &&
+									*o.Controller &&
+									*o.BlockOwnerDeletion &&
+									p.Spec.RestartPolicy == v1.RestartPolicyNever
 							}
 						}
 					}
