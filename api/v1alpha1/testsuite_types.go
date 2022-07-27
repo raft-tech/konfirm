@@ -21,45 +21,96 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// +kubebuilder:validate:enum=Waiting;Running
+// +kubebuilder:validate:enum=Pending;Ready;Running;Error
 // TestSuitePhase describes the phase a TestSuite is currently in
 type TestSuitePhase string
 
 const (
-	TestSuiteWaiting TestSuitePhase = "Waiting"
+	TestSuitePending TestSuitePhase = "Pending"
+	TestSuiteReady   TestSuitePhase = "Ready"
 	TestSuiteRunning TestSuitePhase = "Running"
+	TestSuiteError   TestSuitePhase = "Error"
 )
+
+// IsPending returns true if TestSuitePhase is "Pending"
+func (p TestSuitePhase) IsPending() bool {
+	return p == TestSuitePending
+}
+
+// IsReady returns true if TestSuitePhase is "Ready"
+func (p TestSuitePhase) IsReady() bool {
+	return p == TestSuiteReady
+}
 
 // IsRunning returns true if TestSuitePhase is "Running"
 func (p TestSuitePhase) IsRunning() bool {
 	return p == TestSuiteRunning
 }
 
-// TestSuiteTriggers describes when a TestSuite should run
-type TestSuiteTriggers struct {
-
-	//+kubebuilder:validation:MinLength=0
-	// Schedule in Cron format, see https://en.wikipedia.org/wiki/Cron.
-	Schedule string `json:"cron,omitempty"`
+// IsError returns true if TestSuitePhase is "Error"
+func (p TestSuitePhase) IsError() bool {
+	return p == TestSuitePending
 }
 
 // TestTemplate describes a templated Test
 type TestTemplate struct {
-	Name string             `json:"name"`
-	Test v1.PodTemplateSpec `json:"test"`
+
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Required
+	Description string `json:"description"`
+
+	RetentionPolicy TestRetainPolicy `json:"retentionPolicy,omitempty"`
+
+	// +kubebuilder:validation:Required
+	Template v1.PodTemplateSpec `json:"template"`
+}
+
+// TestSuiteHelmTrigger describes a Helm release that will trigger a TestSuite
+type TestSuiteHelmTrigger struct {
+	Release string `json:"release,omitempty"`
+}
+
+// TestSuiteTriggers describes when a TestSuite should run
+type TestSuiteTriggers struct {
+
+	// Schedule in Cron format, see https://en.wikipedia.org/wiki/Cron.
+	Schedule string `json:"cron,omitempty"`
+
+	// HelmRelease to watch for upgrades/install
+	HelmRelease string `json:"helmRelease,omitempty"`
+}
+
+// TestSuiteHelmSetUp describes a Secret-embedded
+type TestSuiteHelmSetUp struct {
+	SecretName string `json:"secret,omitempty"`
+	ChartKey   string `json:"chartKey,omitempty"`
+	ValuesKey  string `json:"valuesKey,omitempty"`
+}
+
+// TestSuiteSetUp describes any setup that should occur before the Tests are run
+type TestSuiteSetUp struct {
+	Helm TestSuiteHelmSetUp `json:"helm,omitempty"`
 }
 
 // TestSuiteSpec defines the desired state of TestSuite
 type TestSuiteSpec struct {
-	RetentionPolicy TestRetainPolicy  `json:"retentionPolicy,omitempty"`
-	Triggers        TestSuiteTriggers `json:"triggers,omitempty"`
-	Tests           []TestTemplate    `json:"tests"`
+
+	// +kubebuilder:default=OnFailure
+	RetentionPolicy TestRetainPolicy `json:"retentionPolicy,omitempty"`
+
+	SetUp TestSuiteSetUp `json:"setUp,omitempty"`
+
+	// +kubebuilder:validation:MinItems=1
+	Tests []TestTemplate `json:"tests"`
+
+	When TestSuiteTriggers `json:"when,omitempty"`
 }
 
 // TestSuiteTrigger describes the trigger state of TestSuite
 type TestSuiteTrigger struct {
 
 	// +kubebuilder:default:false
+	// NeedsRun is true if the TestSuite should be triggered
 	NeedsRun bool `json:"needsRun"`
 }
 
@@ -69,14 +120,13 @@ type TestSuiteStatus struct {
 	// Current Conditions
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
-	// Phase (Pending, Running, Succeeded, Failed, or Unknown)
+	// Phase (Pending, Ready, Running, Error)
 	Phase TestSuitePhase `json:"phase,omitempty"`
 }
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:trigger
 //+kubebuilder:subresource:status
-
 // TestSuite is the Schema for the testsuites API
 type TestSuite struct {
 	metav1.TypeMeta   `json:",inline"`
@@ -87,7 +137,6 @@ type TestSuite struct {
 }
 
 //+kubebuilder:object:root=true
-
 // TestSuiteList contains a list of TestSuite
 type TestSuiteList struct {
 	metav1.TypeMeta `json:",inline"`

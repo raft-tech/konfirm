@@ -36,18 +36,41 @@ spec:
             description: TestSuiteSpec defines the desired state of TestSuite
             properties:
               retentionPolicy:
+                default: OnFailure
                 enum:
                 - Always
                 - Never
                 - OnFailure
                 type: string
+              setUp:
+                description: TestSuiteSetUp describes any setup that should occur
+                  before the Tests are run
+                properties:
+                  helm:
+                    description: TestSuiteHelmSetUp describes a Secret-embedded
+                    properties:
+                      chartKey:
+                        type: string
+                      secret:
+                        type: string
+                      valuesKey:
+                        type: string
+                    type: object
+                type: object
               tests:
                 items:
                   description: TestTemplate describes a templated Test
                   properties:
-                    name:
+                    description:
+                      minLength: 1
                       type: string
-                    test:
+                    retentionPolicy:
+                      enum:
+                      - Always
+                      - Never
+                      - OnFailure
+                      type: string
+                    template:
                       description: PodTemplateSpec describes the data a pod should
                         have when created from a template
                       properties:
@@ -7678,16 +7701,19 @@ spec:
                           type: object
                       type: object
                   required:
-                  - name
-                  - test
+                  - description
+                  - template
                   type: object
+                minItems: 1
                 type: array
-              triggers:
+              when:
                 description: TestSuiteTriggers describes when a TestSuite should run
                 properties:
                   cron:
                     description: Schedule in Cron format, see https://en.wikipedia.org/wiki/Cron.
-                    minLength: 0
+                    type: string
+                  helmRelease:
+                    description: HelmRelease to watch for upgrades/install
                     type: string
                 type: object
             required:
@@ -7766,13 +7792,14 @@ spec:
                   type: object
                 type: array
               phase:
-                description: Phase (Pending, Running, Succeeded, Failed, or Unknown)
+                description: Phase (Pending, Ready, Running, Error)
                 type: string
             type: object
           trigger:
             description: TestSuiteTrigger describes the trigger state of TestSuite
             properties:
               needsRun:
+                description: NeedsRun is true if the TestSuite should be triggered
                 type: boolean
             required:
             - needsRun

@@ -31,9 +31,9 @@ import (
 )
 
 const (
+	podIndexKey             = ".metadata.controller"
 	PodCreatedCondition     = "PodCreated"
 	TestCompletedCondition  = "TestCompleted"
-	podIndexKey             = ".metadata.controller"
 	TestStartingEvent       = "PodCreated"
 	TestRunningEvent        = "PodRunning"
 	TestPassedEvent         = "TestPassed"
@@ -58,7 +58,7 @@ type TestReconciler struct {
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
-//
+// TODO: Do not log returned errors, they will be logged by the calling function
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.11.2/pkg/reconcile
 func (r *TestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -74,7 +74,7 @@ func (r *TestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		if err != nil {
 			logger.Error(err, "error getting test")
 		} else {
-			logger.Trace().Info("test does not exist")
+			logger.Debug().Info("test no longer exists")
 		}
 		return ctrl.Result{}, err
 	}
@@ -88,15 +88,11 @@ func (r *TestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		logger.Error(err, "error getting pods")
 		return ctrl.Result{}, err
 	}
-
-	// If test is being deleted clean up pods and return
-	if test.DeletionTimestamp != nil {
-
-	}
+	logger.Debug().Info("retrieved controlled pods")
 
 	// Retrieve or create the pod
 	var pod *v1.Pod
-	switch l := len(pods.Items); true {
+	switch l := len(pods.Items); {
 	case test.DeletionTimestamp != nil && l > 0:
 		logger.Trace().Info("deleting pods")
 		err := r.deleteTestPods(ctx, pods.Items)

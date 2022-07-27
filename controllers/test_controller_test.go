@@ -39,25 +39,6 @@ var _ = Describe("Test Controller", func() {
 		test *konfirmv1alpha1.Test
 	)
 
-	// Helper function for retrieving a Test's pods
-	var getPods = func() ([]v1.Pod, error) {
-		var pods []v1.Pod
-		var err error
-		var podList v1.PodList
-		if err = k8sClient.List(ctx, &podList, client.InNamespace(test.Namespace)); err == nil {
-			for _, p := range podList.Items {
-				for _, o := range p.GetOwnerReferences() {
-					if o.APIVersion == konfirmv1alpha1.GroupVersion.String() &&
-						o.Kind == "Test" &&
-						o.Name == test.Name {
-						pods = append(pods, p)
-					}
-				}
-			}
-		}
-		return pods, err
-	}
-
 	BeforeEach(func() {
 		ctx = context.Background()
 		test = &konfirmv1alpha1.Test{
@@ -142,7 +123,7 @@ var _ = Describe("Test Controller", func() {
 			if podPhase != v1.PodPending {
 				Eventually(func() bool {
 					ok := false
-					if pods, err := getPods(); err == nil && len(pods) == 1 {
+					if pods, err := getPods(ctx, test); err == nil && len(pods) == 1 {
 						pod := &pods[0]
 						orig := pod.DeepCopy()
 						pod.Status.Phase = podPhase
@@ -221,7 +202,7 @@ var _ = Describe("Test Controller", func() {
 			JustBeforeEach(func() {
 				Eventually(func() bool {
 					ok := false
-					if pods, err := getPods(); err == nil && len(pods) == 1 {
+					if pods, err := getPods(ctx, test); err == nil && len(pods) == 1 {
 						pod := &pods[0]
 						orig := pod.DeepCopy()
 						pod.Status.ContainerStatuses = containerStatuses
@@ -260,7 +241,7 @@ var _ = Describe("Test Controller", func() {
 				})
 
 				It("it should delete the pods", func() {
-					Eventually(getPods).Should(BeEmpty())
+					Eventually(func() ([]v1.Pod, error) { return getPods(ctx, test) }).Should(BeEmpty())
 				})
 
 				When("retention policy is Never", func() {
@@ -270,7 +251,7 @@ var _ = Describe("Test Controller", func() {
 					})
 
 					It("it should delete the pods", func() {
-						Eventually(getPods).Should(BeEmpty())
+						Eventually(func() ([]v1.Pod, error) { return getPods(ctx, test) }).Should(BeEmpty())
 					})
 				})
 
@@ -283,7 +264,7 @@ var _ = Describe("Test Controller", func() {
 						Eventually(func(g Gomega) {
 							g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(test), test)).ToNot(HaveOccurred())
 							g.Expect(test.Status.Phase).To(Equal(konfirmv1alpha1.TestPassed), "test did not reach the Passed phase")
-							g.Expect(getPods()).To(HaveLen(1))
+							g.Expect(getPods(ctx, test)).To(HaveLen(1))
 						}, timeout)
 					})
 				})
@@ -321,7 +302,7 @@ var _ = Describe("Test Controller", func() {
 					Eventually(func(g Gomega) {
 						g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(test), test)).ToNot(HaveOccurred())
 						g.Expect(test.Status.Phase).To(Equal(konfirmv1alpha1.TestFailed), "test did not reach the Failed phase")
-						g.Expect(getPods()).To(HaveLen(1))
+						g.Expect(getPods(ctx, test)).To(HaveLen(1))
 					}, timeout)
 				})
 
@@ -332,7 +313,7 @@ var _ = Describe("Test Controller", func() {
 					})
 
 					It("it should delete the pods", func() {
-						Eventually(getPods).Should(BeEmpty())
+						Eventually(func() ([]v1.Pod, error) { return getPods(ctx, test) }).Should(BeEmpty())
 					})
 				})
 
@@ -345,7 +326,7 @@ var _ = Describe("Test Controller", func() {
 						Eventually(func(g Gomega) {
 							g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(test), test)).ToNot(HaveOccurred())
 							g.Expect(test.Status.Phase).To(Equal(konfirmv1alpha1.TestPassed), "test did not reach the Passed phase")
-							g.Expect(getPods()).To(HaveLen(1))
+							g.Expect(getPods(ctx, test)).To(HaveLen(1))
 						}, timeout)
 					})
 				})

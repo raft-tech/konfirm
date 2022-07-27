@@ -95,7 +95,12 @@ var _ = BeforeSuite(func() {
 	}).SetupWithManager(mgr)
 	Expect(err).ToNot(HaveOccurred())
 
-	// TODO Add TestSuiteController to test manager
+	err = (&controllers.TestSuiteReconciler{
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("testsuite-controller"),
+	}).SetupWithManager(mgr)
+	Expect(err).ToNot(HaveOccurred())
 
 	// Start manager
 	mgrCtx, mgrCancel = context.WithCancel(context.TODO())

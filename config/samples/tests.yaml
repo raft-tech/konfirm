@@ -1,56 +1,48 @@
----
 apiVersion: konfirm.goraft.tech/v1alpha1
-kind: Test
+kind: TestSuite
 metadata:
-  name: pass
-spec:
-  template:
-    spec:
-      containers:
-        - name: pass
-          image: konfirm/mock:v0.1.0
-          args:
-            - '"This should always pass"'
----
-apiVersion: konfirm.goraft.tech/v1alpha1
-kind: Test
-metadata:
-  name: fail
-spec:
-  template:
-    spec:
-      containers:
-      - name: fail
-        image: konfirm/mock:v0.1.0
-        args:
-          - "--fail"
-          - '"This should always fail"'
----
-apiVersion: konfirm.goraft.tech/v1alpha1
-kind: Test
-metadata:
-  name: fail-and-cleanup
-spec:
-  retentionPolicy: Never
-  template:
-    spec:
-      containers:
-      - name: fail
-        image: konfirm/mock:v0.1.0
-        args:
-          - "--fail"
-          - '"This should always fail"'
----
-apiVersion: konfirm.goraft.tech/v1alpha1
-kind: Test
-metadata:
-  name: pass-and-retain
+  name: sample
 spec:
   retentionPolicy: Always
-  template:
-    spec:
-      containers:
-      - name: pass
-        image: konfirm/mock:v0.1.0
-        args:
-          - '"This should always pass"'
+  setUp:
+    helm:
+      secret: test-suite-setup
+      chartKey: chart
+      valuesKey: values
+  tests:
+    - description: This should always pass
+      retentionPolicy: OnFailure
+      template:
+        spec:
+          containers:
+            - name: pass
+              image: konfirm/mock:v0.1.0
+              args:
+                - '"Generals gathered in their masses"'
+    - description: This should pass but retain the pod
+      template:
+        spec:
+          containers:
+            - name: pass
+              image: konfirm/mock:v0.1.0
+              args:
+                - '"Just like witches at black masses"'
+    - description: This should fail and not retain the pod
+      retentionPolicy: Never
+      template:
+        spec:
+          containers:
+            - name: fail
+              image: konfirm/mock:v0.1.0
+              args:
+                - "--fail"
+                - '"Evil minds that plot destruction"'
+    - description: This should fail and retain the pod
+      template:
+        spec:
+          containers:
+            - name: fail
+              image: konfirm/mock:v0.1.0
+              args:
+                - "--fail"
+                - "\"Sorcerer of death's construction\""
