@@ -19,6 +19,7 @@ package controllers_test
 import (
 	"context"
 	"github.com/raft-tech/konfirm/controllers"
+	"github.com/raft-tech/konfirm/logging"
 	"go.uber.org/zap/zapcore"
 	"path/filepath"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -51,14 +52,23 @@ var (
 
 func TestAPIs(t *testing.T) {
 	RegisterFailHandler(Fail)
-
 	RunSpecsWithDefaultAndCustomReporters(t,
 		"Controller Suite",
 		[]Reporter{printer.NewlineReporter{}})
 }
 
 var _ = BeforeSuite(func() {
-	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true), zap.Level(zapcore.DebugLevel)))
+
+	logf.SetLogger(zap.New(
+		zap.WriteTo(GinkgoWriter),
+		zap.UseDevMode(true),
+		zap.Level(zapcore.DebugLevel-2),
+		logging.EncoderLevel(logging.CapitalLevelEncoder),
+		func(o *zap.Options) {
+			o.EncoderConfigOptions = append(o.EncoderConfigOptions, func(config *zapcore.EncoderConfig) {
+				config.EncodeTime = zapcore.RFC3339TimeEncoder
+			})
+		}))
 
 	By("bootstrapping test environment")
 	testEnv = &envtest.Environment{

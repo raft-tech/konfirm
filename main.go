@@ -18,6 +18,7 @@ package main
 
 import (
 	"flag"
+	"github.com/raft-tech/konfirm/logging"
 	"os"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -58,8 +59,11 @@ func main() {
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
 	opts := zap.Options{
-		Development: true,
+		EncoderConfigOptions: []zap.EncoderConfigOption{
+			logging.EncoderLevelConfig(logging.LowercaseLevelEncoder),
+		},
 	}
+
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 

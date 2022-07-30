@@ -63,38 +63,52 @@ type TestReconciler struct {
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.11.2/pkg/reconcile
 func (r *TestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 
-	logger := logging.FromContext(ctx, "test", req.NamespacedName)
-	logger.Debug().Info("starting test reconciliation")
+	logger := logging.FromContextWithName(ctx, "test-controller")
+	logger.DebugL().Info("starting test reconciliation")
 
 	// Retrieve the subject Test
-	logger.Trace().Info("getting test")
+	logger.TraceL().Info("getting test")
 	var test konfirmv1alpha1.Test
 	if err := r.Get(ctx, req.NamespacedName, &test); err != nil {
 		err = client.IgnoreNotFound(err)
 		if err != nil {
 			logger.Error(err, "error getting test")
 		} else {
-			logger.Debug().Info("test no longer exists")
+			logger.DebugL().Info("test no longer exists")
 		}
 		return ctrl.Result{}, err
 	}
 	logger = logger.WithValues("generation", test.Generation)
-	logger.Trace().Info("retrieved test")
+	logger.TraceL().Info("retrieved test")
+
+	// If Test status is empty, make pending
+	if test.Status.Phase == "" {
+		logger.TraceL().Info("patching status")
+		orig := test.DeepCopy()
+		test.Status.Phase = konfirmv1alpha1.TestPending
+		err := r.Client.Status().Patch(ctx, &test, client.MergeFrom(orig))
+		if err == nil {
+			logger.DebugL().Info("status patched", "phase", test.Status.Phase)
+		} else {
+			logger.Info("error patching status")
+		}
+		return ctrl.Result{}, err
+	}
 
 	// Retrieve any controlled pods
-	logger.Trace().Info("getting pods")
+	logger.TraceL().Info("getting pods")
 	var pods v1.PodList
 	if err := r.List(ctx, &pods, client.InNamespace(req.Namespace), client.MatchingFields{podIndexKey: req.Name}); err != nil {
 		logger.Error(err, "error getting pods")
 		return ctrl.Result{}, err
 	}
-	logger.Debug().Info("retrieved controlled pods")
+	logger.DebugL().Info("retrieved controlled pods")
 
 	// Retrieve or create the pod
 	var pod *v1.Pod
 	switch l := len(pods.Items); {
 	case test.DeletionTimestamp != nil && l > 0:
-		logger.Trace().Info("deleting pods")
+		logger.TraceL().Info("deleting pods")
 		err := r.deleteTestPods(ctx, pods.Items)
 		if err == nil {
 			logger.Info("pods deleted")
@@ -122,10 +136,10 @@ func (r *TestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 				test.Finalizers = append(test.Finalizers, f)
 			}
 		}
-		logger.Trace().Info("patching finalizer")
+		logger.TraceL().Info("patching finalizer")
 		err := r.Client.Patch(ctx, &test, client.MergeFrom(orig))
 		if err == nil {
-			logger.Debug().Info("finalizer removed")
+			logger.DebugL().Info("finalizer removed")
 		} else {
 			logger.Error(err, "error removing Test finalizer")
 		}
@@ -145,13 +159,13 @@ func (r *TestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 			test.Finalizers = append(test.Finalizers, TestControllerFinalizer)
 			err := r.Client.Patch(ctx, &test, client.MergeFrom(orig))
 			if err == nil {
-				logger.Debug().Info("added test-controller finalizer")
+				logger.DebugL().Info("added test-controller finalizer")
 			} else {
 				logger.Error(err, "error adding test-controller finalizer")
 			}
 			return ctrl.Result{}, err
 		}
-		logger.Trace().Info("creating pod")
+		logger.TraceL().Info("creating pod")
 		if p, err := r.createTestPod(ctx, req, &test); err == nil {
 			logger.Info("pod created", "pod", client.ObjectKeyFromObject(p).String())
 			pod = p
@@ -196,7 +210,7 @@ func (r *TestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		})
 	}
 
-	logger.Trace().Info("patching status")
+	logger.TraceL().Info("patching status")
 	err := r.Client.Status().Patch(ctx, &test, client.MergeFrom(orig))
 	if err == nil {
 		logger.Info("status patched", "phase", test.Status.Phase)

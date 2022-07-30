@@ -120,6 +120,7 @@ type TestSuiteStatus struct {
 	// Current Conditions
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
+	// +kubebuilder:default=Pending
 	// Phase (Pending, Ready, Running, Error)
 	Phase TestSuitePhase `json:"phase,omitempty"`
 }

@@ -7792,6 +7792,7 @@ spec:
                   type: object
                 type: array
               phase:
+                default: Pending
                 description: Phase (Pending, Ready, Running, Error)
                 type: string
             type: object

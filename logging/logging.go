@@ -19,34 +19,50 @@ package logging
 import (
 	"context"
 	"github.com/go-logr/logr"
+	"go.uber.org/zap/zapcore"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"strconv"
 )
 
 const (
-	INFO = iota
+	INFO = iota + 1
 	DEBUG
 	TRACE
 )
 
 type Logger struct {
 	logr.Logger
+	warn  logr.Logger
 	debug logr.Logger
 	trace logr.Logger
 }
 
 func NewLogger(from logr.Logger) *Logger {
-	logger := &Logger{
+	return &Logger{
 		Logger: from,
+		warn:   from,
+		debug:  from.V(1),
+		trace:  from.V(2),
 	}
-	logger.debug = logger.Logger.V(DEBUG)
-	logger.trace = logger.Logger.V(TRACE)
-	return logger
 }
 
-func (l *Logger) Debug() logr.Logger {
+func (l *Logger) Warn(msg string, keysAndValues ...interface{}) {
+	l.warn.Info(msg, keysAndValues...)
+}
+
+func (l *Logger) Debug(msg string, keysAndValues ...interface{}) {
+	l.debug.Info(msg, keysAndValues...)
+}
+
+func (l *Logger) DebugL() logr.Logger {
 	return l.debug
 }
 
-func (l *Logger) Trace() logr.Logger {
+func (l *Logger) Trace(msg string, keysAndValues ...interface{}) {
+	l.trace.Info(msg, keysAndValues...)
+}
+
+func (l *Logger) TraceL() logr.Logger {
 	return l.trace
 }
 
@@ -56,4 +72,46 @@ func (l *Logger) WithValues(keysAndValues ...interface{}) *Logger {
 
 func FromContext(ctx context.Context, keysAndValues ...interface{}) *Logger {
 	return NewLogger(logr.FromContextOrDiscard(ctx).WithValues(keysAndValues...))
+}
+
+func FromContextWithName(ctx context.Context, name string, keysAndValues ...interface{}) *Logger {
+	return NewLogger(logr.FromContextOrDiscard(ctx).WithName(name).WithValues(keysAndValues...))
+}
+
+func EncoderLevel(enc zapcore.LevelEncoder) zap.Opts {
+	return func(o *zap.Options) {
+		o.EncoderConfigOptions = append(o.EncoderConfigOptions, EncoderLevelConfig(enc))
+	}
+}
+
+func EncoderLevelConfig(enc zapcore.LevelEncoder) zap.EncoderConfigOption {
+	return func(c *zapcore.EncoderConfig) {
+		c.EncodeLevel = enc
+	}
+}
+
+func LowercaseLevelEncoder(level zapcore.Level, encoder zapcore.PrimitiveArrayEncoder) {
+	switch {
+	case level < zapcore.DebugLevel:
+		str := "trace"
+		if l := int(zapcore.DebugLevel - level); l > 1 {
+			str += strconv.Itoa(l)
+		}
+		encoder.AppendString(str)
+	default:
+		encoder.AppendString(level.String())
+	}
+}
+
+func CapitalLevelEncoder(level zapcore.Level, encoder zapcore.PrimitiveArrayEncoder) {
+	switch {
+	case level < zapcore.DebugLevel:
+		str := "TRACE"
+		if l := int(zapcore.DebugLevel - level); l > 1 {
+			str += strconv.Itoa(l)
+		}
+		encoder.AppendString(str)
+	default:
+		encoder.AppendString(level.CapitalString())
+	}
 }
