@@ -27,17 +27,19 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
+	"reflect"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"time"
 )
 
 const (
-	testIndexKey                       = ".metadata.controller"
-	TestSuiteControllerFinalizer       = konfirm.GroupName + "/testsuite-controller"
-	TestSuiteRunStartedCondition       = "RunStarted"
-	TestSuiteHasPreviousTestsCondition = "HasPreviousTests"
-	TestSuiteErrorCondition            = "HasError"
-	testSuiteControllerLoggerName      = "testsuite-controller"
+	testRunIndexKey                       = ".metadata.controller"
+	TestSuiteControllerFinalizer          = konfirm.GroupName + "/testsuite-controller"
+	TestSuiteRunStartedCondition          = "RunStarted"
+	TestSuiteHasPreviousTestRunsCondition = "HasPreviousTestRun"
+	TestSuiteErrorCondition               = "HasError"
+	testSuiteControllerLoggerName         = "testsuite-controller"
 )
 
 // TestSuiteReconciler reconciles a TestSuite object
@@ -47,9 +49,10 @@ type TestSuiteReconciler struct {
 	Recorder record.EventRecorder
 }
 
-//+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=testsuites,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=testsuites/trigger;testsuites/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=testsuites/finalizers,verbs=update
+//+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=testsuites,verbs=get;list;watch
+//+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=testsuites/trigger;testsuites/status,verbs=get;patch
+//+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=testsuites/finalizers,verbs=update;patch
+//+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=testruns,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -57,6 +60,8 @@ type TestSuiteReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.11.2/pkg/reconcile
 func (r *TestSuiteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+
+	// FIXME requeue all error returns
 
 	logger := logging.FromContextWithName(ctx, testSuiteControllerLoggerName)
 	logger.Debug("starting test suite reconciliation")
@@ -86,28 +91,29 @@ func (r *TestSuiteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		logger.Debug("test suite Pending")
 	}
 
-	// Get any controlled Tests
-	logger.Trace("getting tests")
-	var tests konfirm.TestList
-	if err := r.List(ctx, &tests, client.InNamespace(req.Namespace), client.MatchingFields{testIndexKey: req.Name}); err != nil {
-		logger.Debug("error getting tests")
+	// Get any controlled Test Runs
+	logger.Trace("getting test runs")
+	var testRuns konfirm.TestRunList
+	if err := r.List(ctx, &testRuns, client.InNamespace(req.Namespace), client.MatchingFields{testIndexKey: req.Name}); err != nil {
+		logger.Debug("error getting test runs")
 		return ctrl.Result{}, err
 	}
-	logger.Debug("retrieved controlled tests")
+	logger.Debug("retrieved controlled test runs")
 
 	// If controlled Tests exists, the finalizer must be set
-	if n := len(tests.Items); n > 0 {
+	if n := len(testRuns.Items); n > 0 {
 		logger.Trace("ensuring finalizer exists")
-		if patched, err := r.addFinalizer(ctx, &testSuite); patched && err == nil {
+		if patched, err := addFinalizer(ctx, r.Client, TestSuiteControllerFinalizer, &testSuite); patched && err == nil {
 			logger.Debug("added finalizer")
 		} else if err != nil {
 			logger.Info("error adding finalizer")
 			return ctrl.Result{}, err
 		}
-	} else {
-		// No controlled Tests, so the finalizer should be cleared
+	} else if !testSuite.Status.Phase.IsRunning() {
+		// No controlled Tests, so the finalizer should be cleared if not running
+		// TODO This should be moved to the ready and error states
 		logger.Trace("removing finalizer if necessary")
-		if patched, err := r.removeFinalizer(ctx, &testSuite); patched && err == nil {
+		if patched, err := removeFinalizer(ctx, r.Client, TestSuiteControllerFinalizer, &testSuite); patched && err == nil {
 			logger.Debug("removed finalizer")
 		} else if err != nil {
 			if apierrors.IsNotFound(err) {
@@ -122,40 +128,63 @@ func (r *TestSuiteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	// Handle deleted test suites
 	if testSuite.DeletionTimestamp != nil {
-		if len(tests.Items) > 0 {
-			logger.Trace("deleting tests")
-			if _, err := r.deleteTests(ctx, tests.Items); err != nil {
+		if len(testRuns.Items) > 0 {
+			logger.Trace("deleting test runs")
+			if _, err := cleanUpAll(ctx, r.Client, TestSuiteControllerFinalizer, testRuns.GetObjects()); err != nil {
 				logger.Info("error getting tests")
 				return ctrl.Result{}, err
 			}
-			logger.Debug("deleted tests")
+			logger.Debug("deleted test runs")
 		} else {
+			logger.Trace("removing finalizer if necessary")
+			if patched, err := cleanUp(ctx, r.Client, TestSuiteControllerFinalizer, &testSuite); err != nil {
+				logger.Info("error removing finalizer")
+				return ctrl.Result{
+					Requeue:      true,
+					RequeueAfter: time.Minute,
+				}, err
+			} else if patched {
+				logger.Debug("removed finalizer")
+			}
 			logger.Debug("test suite deleted, nothing to do")
 		}
 		return ctrl.Result{}, nil
+	}
+
+	// Handled changed Tests
+	for i := range testRuns.Items {
+		if !reflect.DeepEqual(testRuns.Items[i].Spec.Tests, testSuite.Spec.Tests) {
+			logger := logger.WithValues("testRun", testRuns.Items[i].Name)
+			logger.Trace("cleaning up out-of-date test run")
+			if _, err := cleanUp(ctx, r.Client, TestSuiteControllerFinalizer, &testRuns.Items[i]); err != nil {
+				logger.Info("error cleaning up out-of-date test run")
+				return ctrl.Result{}, err
+			}
+			logger.Debug("out-of-date test run removed")
+		}
 	}
 
 	// Phase-specific logic
 	switch testSuite.Status.Phase {
 
 	case konfirm.TestSuitePending:
-		return r.isPending(ctx, &testSuite, tests.Items)
-
-	case konfirm.TestSuiteError:
-		return r.isError(ctx, &testSuite, tests.Items)
+		return r.isPending(ctx, &testSuite)
 
 	case konfirm.TestSuiteReady:
-		return r.isReady(ctx, &testSuite, tests.Items)
+		return r.isReady(ctx, &testSuite)
 
 	case konfirm.TestSuiteRunning:
-		return r.isRunning(ctx, &testSuite, tests.Items)
+		return r.isRunning(ctx, &testSuite, &testRuns)
+
+	case konfirm.TestSuiteError:
+		return r.isError(ctx, &testSuite, &testRuns)
 
 	default:
 		return ctrl.Result{}, errors.New(fmt.Sprintf("unrecognized phase: %s", testSuite.Status.Phase))
 	}
 }
 
-func (r *TestSuiteReconciler) isPending(ctx context.Context, testSuite *konfirm.TestSuite, tests []konfirm.Test) (ctrl.Result, error) {
+func (r *TestSuiteReconciler) isPending(ctx context.Context, testSuite *konfirm.TestSuite) (ctrl.Result, error) {
 	logger := logging.FromContextWithName(ctx, testSuiteControllerLoggerName)
 	// TODO: If setUp is not nil, ensure it is possible
 	orig := testSuite.DeepCopy()
@@ -170,7 +199,7 @@ func (r *TestSuiteReconciler) isPending(ctx context.Context, testSuite *konfirm.
 	return ctrl.Result{}, err
 }
 
-func (r *TestSuiteReconciler) isReady(ctx context.Context, testSuite *konfirm.TestSuite, tests []konfirm.Test) (ctrl.Result, error) {
+func (r *TestSuiteReconciler) isReady(ctx context.Context, testSuite *konfirm.TestSuite) (ctrl.Result, error) {
 	logger := logging.FromContextWithName(ctx, testSuiteControllerLoggerName)
 
 	var patch client.Patch
@@ -197,8 +226,13 @@ func (r *TestSuiteReconciler) isReady(ctx context.Context, testSuite *konfirm.Te
 		// First reset trigger
 		logger.Trace("resetting trigger", "trigger", trigger)
 		if err = r.Client.Patch(ctx, testSuite, patch); err != nil {
-			logger.Info("error resetting trigger", "trigger", trigger)
-			return ctrl.Result{}, err
+			if apierrors.IsNotFound(err) {
+				logger.Debug("test suite no longer exists")
+				return ctrl.Result{}, nil
+			} else {
+				logger.Info("error resetting trigger", "trigger", trigger)
+				return ctrl.Result{}, err
+			}
 		}
 		logger.Debug("trigger reset", "trigger", trigger)
 
@@ -213,17 +247,22 @@ func (r *TestSuiteReconciler) isReady(ctx context.Context, testSuite *konfirm.Te
 			Message:            message,
 		})
 		logger.Trace("patching test suite status to Running")
-		err = r.Client.Status().Patch(ctx, testSuite, client.MergeFrom(orig))
-		if err == nil {
-			logger.Info("test suite Running")
-		} else {
+		switch err = r.Client.Status().Patch(ctx, testSuite, client.MergeFrom(orig)); true {
+		case apierrors.IsNotFound(err):
+			logger.Debug("test suite no longer exists")
+			err = nil
+		case err != nil:
 			logger.Info("error setting test suit to Running")
+		case err == nil:
+			logger.Info("test suite Running")
 		}
+	} else {
+
 	}
-	return ctrl.Result{}, nil
+	return ctrl.Result{}, err
 }
 
-func (r *TestSuiteReconciler) isRunning(ctx context.Context, testSuite *konfirm.TestSuite, tests []konfirm.Test) (ctrl.Result, error) {
+func (r *TestSuiteReconciler) isRunning(ctx context.Context, testSuite *konfirm.TestSuite, testRuns *konfirm.TestRunList) (ctrl.Result, error) {
 
 	logger := logging.FromContextWithName(ctx, testSuiteControllerLoggerName)
 
@@ -246,18 +285,18 @@ func (r *TestSuiteReconciler) isRunning(ctx context.Context, testSuite *konfirm.
 		}
 	} else if e.Status == "False" {
 
-		// Ensure all previous tests are removed
-		if n := len(tests); n > 0 {
-			logger.Trace("removing previous tests")
-			change, err := r.deleteTests(ctx, tests)
+		// Ensure all previous testRuns are removed
+		if n := len(testRuns.Items); n > 0 {
+			logger.Trace("removing previous test run")
+			change, err := cleanUpAll(ctx, r.Client, TestSuiteControllerFinalizer, testRuns.GetObjects())
 			if err == nil {
 				if change {
-					logger.Info("removed previous tests")
+					logger.Info("removed previous test run")
 				} else {
-					logger.Info("waiting on previous tests to be removed")
+					logger.Info("waiting on previous test run to be removed")
 				}
 			} else {
-				logger.Info("error removing previous tests")
+				logger.Info("error removing previous test run")
 			}
 			return ctrl.Result{}, err
 		}
@@ -282,90 +321,70 @@ func (r *TestSuiteReconciler) isRunning(ctx context.Context, testSuite *konfirm.
 		}
 	}
 
-	// Start tests
+	// Start a test run
+	var testRun *konfirm.TestRun
+	switch l := len(testRuns.Items); true {
+	case l > 1:
+		logger.Trace("clearing excess test runs")
+		if _, err := cleanUpAll(ctx, r.Client, TestSuiteControllerFinalizer, testRuns.GetObjects()); err != nil {
+			logger.Info("error removing excess test runs")
+			return ctrl.Result{}, err
+		}
+		logger.Info("multiple test runs found, cleared to restart")
+	case l == 1:
+		testRun = &testRuns.Items[0]
+	default:
+		yes := true
+		testRun = &konfirm.TestRun{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: testSuite.Name + "-",
+				Namespace:    testSuite.Namespace,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         konfirm.GroupVersion.String(),
+						Kind:               "TestSuite",
+						Name:               testSuite.Name,
+						UID:                testSuite.UID,
+						Controller:         &yes,
+						BlockOwnerDeletion: &yes,
+					},
+				},
+				Finalizers: []string{
+					TestSuiteControllerFinalizer,
+				},
+			},
+			Spec: konfirm.TestRunSpec{
+				RetentionPolicy: testSuite.Spec.RetentionPolicy,
+				Tests:           testSuite.Spec.Tests,
+			},
+		}
+		logger.Trace("creating test run")
+		err := r.Client.Create(ctx, testRun)
+		if err == nil {
+			logger.Info("test run created")
+		} else {
+			logger.Info("error creating test run")
+		}
+		return ctrl.Result{}, err
+	}
 
-	// ensure all tests run to completion
+	// TODO Handle finished test runs
 
-	// Analyze results
 	return ctrl.Result{}, nil
 }
 
-func (r *TestSuiteReconciler) isError(ctx context.Context, testSuite *konfirm.TestSuite, tests []konfirm.Test) (ctrl.Result, error) {
+func (r *TestSuiteReconciler) isError(ctx context.Context, testSuite *konfirm.TestSuite, testRuns *konfirm.TestRunList) (ctrl.Result, error) {
 	_ = logging.FromContextWithName(ctx, testSuiteControllerLoggerName)
 	panic("not implemented")
-}
-
-// addFinalier adds the TestSuiteController finalizer to the
-// provided object.
-// The returned boolean is true if a patch is/was needed. If an error
-// occurs while patching the object it is returned.
-func (r *TestSuiteReconciler) addFinalizer(ctx context.Context, obj client.Object) (bool, error) {
-	var err error
-	patch := true
-	for _, f := range obj.GetFinalizers() {
-		if f == TestSuiteControllerFinalizer {
-			patch = false
-		}
-	}
-	if patch {
-		orig := obj.DeepCopyObject().(client.Object)
-		obj.SetFinalizers(append(obj.GetFinalizers(), TestSuiteControllerFinalizer))
-		err = r.Patch(ctx, obj, client.MergeFrom(orig))
-	}
-	return patch, err
-}
-
-// removeFinalizer removes the TestSuiteController finalizer from the
-// provided object.
-// The returned boolean is true if a patch is/was needed. If an error
-// occurs while patching the object it is returned.
-func (r *TestSuiteReconciler) removeFinalizer(ctx context.Context, obj client.Object) (bool, error) {
-	var err error
-	patch := false
-	var newFinalizers []string
-	for _, f := range obj.GetFinalizers() {
-		if f == TestSuiteControllerFinalizer {
-			patch = true
-		} else {
-			newFinalizers = append(newFinalizers, f)
-		}
-	}
-	if patch {
-		orig := obj.DeepCopyObject().(client.Object)
-		obj.SetFinalizers(newFinalizers)
-		err = r.Patch(ctx, obj, client.MergeFrom(orig))
-	}
-	return patch, err
-}
-
-func (r *TestSuiteReconciler) deleteTests(ctx context.Context, tests []konfirm.Test) (bool, error) {
-	modified := false
-	errs := ErrorList{}
-	for _, t := range tests {
-		if t.DeletionTimestamp == nil {
-			if err := r.Delete(ctx, &t); err == nil {
-				modified = true
-			} else {
-				errs.Append(err)
-				continue
-			}
-		}
-		if patched, err := r.removeFinalizer(ctx, &t); err != nil {
-			errs.Append(err)
-		} else if patched {
-			modified = true
-		}
-	}
-	return modified, errs.Error()
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *TestSuiteReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	// Set up an indexer to reconcile on changes to controlled tests
-	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &konfirm.Test{}, testIndexKey, func(rawObj client.Object) []string {
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &konfirm.TestRun{}, testRunIndexKey, func(rawObj client.Object) []string {
 		// Get the test and owner
-		test := rawObj.(*konfirm.Test)
+		test := rawObj.(*konfirm.TestRun)
 		owner := metav1.GetControllerOf(test)
 		if owner == nil {
 			return nil
@@ -383,16 +402,6 @@ func (r *TestSuiteReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		// Uncomment the following line adding a pointer to an instance of the controlled resource as an argument
 		For(&konfirm.TestSuite{}).
-		Owns(&konfirm.Test{}).
+		Owns(&konfirm.TestRun{}).
 		Complete(r)
-}
-
-// getCondition returns the specified condition if it exists in the provided slice
-func getCondition(condition string, from []metav1.Condition) (*metav1.Condition, bool) {
-	for _, c := range from {
-		if c.Type == condition {
-			return &c, true
-		}
-	}
-	return nil, false
 }

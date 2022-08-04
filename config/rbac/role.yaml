@@ -29,6 +29,7 @@ rules:
   - pods/finalizers
   verbs:
   - patch
+  - update
 - apiGroups:
   - ""
   resources:
@@ -38,24 +39,7 @@ rules:
 - apiGroups:
   - konfirm.goraft.tech
   resources:
-  - tests
-  verbs:
-  - get
-  - list
-  - patch
-  - watch
-- apiGroups:
-  - konfirm.goraft.tech
-  resources:
-  - tests/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
-  - konfirm.goraft.tech
-  resources:
-  - testsuites
+  - testruns
   verbs:
   - create
   - delete
@@ -67,8 +51,50 @@ rules:
 - apiGroups:
   - konfirm.goraft.tech
   resources:
+  - testruns/finalizers
+  verbs:
+  - patch
+  - update
+- apiGroups:
+  - konfirm.goraft.tech
+  resources:
+  - testruns/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - konfirm.goraft.tech
+  resources:
+  - tests
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - konfirm.goraft.tech
+  resources:
+  - tests/status
+  verbs:
+  - get
+  - patch
+- apiGroups:
+  - konfirm.goraft.tech
+  resources:
+  - testsuites
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - konfirm.goraft.tech
+  resources:
   - testsuites/finalizers
   verbs:
+  - patch
   - update
 - apiGroups:
   - konfirm.goraft.tech
@@ -78,4 +104,3 @@ rules:
   verbs:
   - get
   - patch
-  - update

@@ -49,10 +49,10 @@ type TestReconciler struct {
 	Recorder record.EventRecorder
 }
 
-//+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=tests,verbs=get;list;watch;patch
-//+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=tests/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=tests,verbs=get;list;watch
+//+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=tests/status,verbs=get;patch
 //+kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups="",resources=pods/finalizers,verbs=patch
+//+kubebuilder:rbac:groups="",resources=pods/finalizers,verbs=update;patch
 //+kubebuilder:rbac:groups="",resources=pods/status,verbs=get
 //+kubebuilder:rbac:groups="",resources=events,verbs=create
 
@@ -62,6 +62,8 @@ type TestReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.11.2/pkg/reconcile
 func (r *TestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+
+	// TODO Reconsider the logical flow of TestReconciler based on lessons learned (e.g., when to remove finalizers)
 
 	logger := logging.FromContextWithName(ctx, "test-controller")
 	logger.DebugL().Info("starting test reconciliation")
@@ -252,6 +254,7 @@ func (r *TestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		}
 	}
 
+	// FIXME requeue all erred runs
 	return ctrl.Result{}, err
 }
 

@@ -19,6 +19,7 @@ package v1alpha1
 import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // +kubebuilder:validation:Enum=Always;Never;OnFailure
@@ -29,6 +30,19 @@ const (
 	RetainNever     TestRetainPolicy = "Never"
 	RetainOnFailure TestRetainPolicy = "OnFailure"
 )
+
+// TestTemplate describes a templated Test
+type TestTemplate struct {
+
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Required
+	Description string `json:"description"`
+
+	RetentionPolicy TestRetainPolicy `json:"retentionPolicy,omitempty"`
+
+	// +kubebuilder:validation:Required
+	Template v1.PodTemplateSpec `json:"template"`
+}
 
 // TestSpec defines the desired state of Test
 type TestSpec struct {
@@ -112,6 +126,14 @@ type TestList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []Test `json:"items"`
+}
+
+func (l *TestList) GetObjects() []client.Object {
+	var objs = make([]client.Object, len(l.Items))
+	for i := range l.Items {
+		objs[i] = &l.Items[i]
+	}
+	return objs
 }
 
 func init() {

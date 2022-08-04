@@ -18,12 +18,15 @@ package controllers_test
 
 import (
 	"context"
+	"github.com/onsi/ginkgo/config"
+	"os"
+	"path/filepath"
+	"testing"
+
 	"github.com/raft-tech/konfirm/controllers"
 	"github.com/raft-tech/konfirm/logging"
 	"go.uber.org/zap/zapcore"
-	"path/filepath"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"testing"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -52,9 +55,14 @@ var (
 
 func TestAPIs(t *testing.T) {
 	RegisterFailHandler(Fail)
+	origConifg := config.DefaultReporterConfig
+	if v := os.Getenv("GINGKO_VERBOSE"); v != "" {
+		config.DefaultReporterConfig.Verbose = true
+	}
 	RunSpecsWithDefaultAndCustomReporters(t,
 		"Controller Suite",
 		[]Reporter{printer.NewlineReporter{}})
+	config.DefaultReporterConfig = origConifg
 }
 
 var _ = BeforeSuite(func() {
@@ -105,6 +113,15 @@ var _ = BeforeSuite(func() {
 	}).SetupWithManager(mgr)
 	Expect(err).ToNot(HaveOccurred())
 
+	// Set up TestRunController
+	err = (&controllers.TestRunReconciler{
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("testrun-controller"),
+	}).SetupWithManager(mgr)
+	Expect(err).ToNot(HaveOccurred())
+
+	// Set up TestSuiteController
 	err = (&controllers.TestSuiteReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),

@@ -30,7 +30,7 @@ import (
 
 var _ = Describe("TestSuite Controller", func() {
 
-	const timeout = "100ms"
+	const timeout = "500ms"
 
 	var (
 		ctx       context.Context
@@ -72,15 +72,33 @@ var _ = Describe("TestSuite Controller", func() {
 
 		// All pods are gone
 		Eventually(func() ([]v1.Pod, error) {
-			pods := v1.PodList{}
-			return pods.Items, k8sClient.List(ctx, &pods)
-		}, timeout).Should(BeEmpty(), "not all Pods were removed")
+			var pods v1.PodList
+			if err := k8sClient.List(ctx, &pods); err == nil {
+				return pods.Items, nil
+			} else {
+				return nil, err
+			}
+		}, timeout).Should(BeEmpty())
 
 		// All tests are gone
 		Eventually(func() ([]konfirm.Test, error) {
-			tests := konfirm.TestList{}
-			return tests.Items, k8sClient.List(ctx, &tests)
-		}, timeout).Should(BeEmpty(), "not all Tests were removed")
+			var tests konfirm.TestList
+			if err := k8sClient.List(ctx, &tests); err == nil {
+				return tests.Items, nil
+			} else {
+				return nil, err
+			}
+		}, timeout).Should(BeEmpty())
+
+		// All test runs are gone
+		Eventually(func() ([]konfirm.TestRun, error) {
+			var testRuns konfirm.TestRunList
+			if err := k8sClient.List(ctx, &testRuns); err == nil {
+				return testRuns.Items, nil
+			} else {
+				return nil, err
+			}
+		}, timeout).Should(BeEmpty())
 
 		// All test suites are gone
 		Eventually(func() ([]konfirm.TestSuite, error) {
@@ -99,7 +117,7 @@ var _ = Describe("TestSuite Controller", func() {
 			Expect(k8sClient.Delete(ctx, testSuite)).NotTo(HaveOccurred())
 		})
 
-		It("reaches the Ready state", func() {
+		It("it reaches the Ready state", func() {
 			Eventually(func() (konfirm.TestSuitePhase, error) {
 				return testSuite.Status.Phase, k8sClient.Get(ctx, client.ObjectKeyFromObject(testSuite), testSuite)
 			}, timeout).Should(Equal(konfirm.TestSuiteReady))
@@ -120,17 +138,39 @@ var _ = Describe("TestSuite Controller", func() {
 			Expect(k8sClient.Delete(ctx, testSuite)).NotTo(HaveOccurred())
 		})
 
-		When("previous tests where run", func() {
+		When("and it is triggered", func() {
 
-			var test *konfirm.Test
+			BeforeEach(func() {
+				orig := testSuite.DeepCopy()
+				testSuite.Trigger = konfirm.TestSuiteTrigger{NeedsRun: true}
+				Expect(k8sClient.Patch(ctx, testSuite, client.MergeFrom(orig))).NotTo(HaveOccurred())
+			})
+
+			It("it should progress to the Running phase", func() {
+				Eventually(func(g Gomega) {
+					g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(testSuite), testSuite)).NotTo(HaveOccurred())
+					g.Expect(testSuite.Status.Phase).To(Equal(konfirm.TestSuiteRunning))
+					g.Expect(testSuite.Status.Conditions).To(HaveKey(And(
+						HaveField("Type", controllers.TestSuiteRunStartedCondition),
+						HaveField("Status", "True"),
+						HaveField("Reason", "Manual"),
+						HaveField("Message", "TestSuite was manually triggered"),
+					)))
+				})
+			})
+		})
+
+		When("and a previous test runs exists", func() {
+
+			var testRun *konfirm.TestRun
 
 			BeforeEach(func() {
 
-				// Add a test
+				// Add a test run
 				yes := true
-				test = &konfirm.Test{
+				testRun = &konfirm.TestRun{
 					ObjectMeta: metav1.ObjectMeta{
-						GenerateName: testSuite.Name + "-akasd8a-",
+						GenerateName: testSuite.Name + "-",
 						Namespace:    testSuite.Namespace,
 						OwnerReferences: []metav1.OwnerReference{
 							{
@@ -143,46 +183,54 @@ var _ = Describe("TestSuite Controller", func() {
 							},
 						},
 					},
-					Spec: konfirm.TestSpec{
-						Template: v1.PodTemplateSpec{
-							Spec: v1.PodSpec{
-								Containers: []v1.Container{
-									{
-										Name:  "main",
-										Image: "konfirm/mock:v1",
-									},
-								},
-							},
-						},
+					Spec: konfirm.TestRunSpec{
+						Tests: testSuite.Spec.Tests,
 					},
 				}
-				Expect(k8sClient.Create(ctx, test)).NotTo(HaveOccurred())
+				Expect(k8sClient.Create(ctx, testRun)).NotTo(HaveOccurred())
 
-				// Progress the pod to succeeded
-				Eventually(func() (v1.PodPhase, error) {
-					var phase v1.PodPhase
-					var err error
+				// Finish the test
+				Eventually(func() (bool, error) {
+
+					var test *konfirm.Test
+					var tests konfirm.TestList
+					if err := k8sClient.List(ctx, &tests, client.InNamespace(testRun.Namespace)); err == nil {
+						for i := range tests.Items {
+							for j := range tests.Items[i].OwnerReferences {
+								if o := &tests.Items[i].OwnerReferences[j]; o.UID == testRun.UID {
+									test = &tests.Items[i]
+									break
+								}
+							}
+							if test != nil {
+								break
+							}
+						}
+						if test == nil {
+							return false, nil
+						}
+					} else {
+						return false, err
+					}
+
 					var pods v1.PodList
-					if err = k8sClient.List(ctx, &pods, client.InNamespace(test.Namespace)); err == nil {
-						for _, p := range pods.Items {
-							for _, o := range p.GetOwnerReferences() {
-								if o.Name == test.Name {
-									orig := p.DeepCopy()
-									p.Status.Phase = v1.PodSucceeded
-									if err = k8sClient.Status().Patch(ctx, &p, client.MergeFrom(orig)); err == nil {
-										phase = p.Status.Phase
-									}
+					if err := k8sClient.List(ctx, &pods, client.InNamespace(test.Namespace)); err == nil {
+						for i := range pods.Items {
+							for j := range pods.Items[i].OwnerReferences {
+								if o := &pods.Items[i].OwnerReferences[j]; o.UID == test.UID {
+									pod := &pods.Items[i]
+									orig := pod.DeepCopy()
+									pod.Status.Phase = v1.PodSucceeded
+									return true, k8sClient.Status().Patch(ctx, pod, client.MergeFrom(orig))
 								}
 							}
 						}
+					} else {
+						return false, err
 					}
-					return phase, err
-				}, timeout).Should(Equal(v1.PodSucceeded))
 
-				// Let the test progress to Passed
-				Eventually(func() (konfirm.TestPhase, error) {
-					return test.Status.Phase, k8sClient.Get(ctx, client.ObjectKeyFromObject(test), test)
-				}, timeout).Should(Equal(konfirm.TestPassed))
+					return false, nil
+				}, timeout).Should(BeTrue())
 			})
 
 			When("a new run is triggered", func() {
@@ -193,30 +241,14 @@ var _ = Describe("TestSuite Controller", func() {
 					Expect(k8sClient.Patch(ctx, testSuite, client.MergeFrom(orig))).NotTo(HaveOccurred())
 				})
 
-				It("it removes previous tests before new tests are run", func() {
+				It("the previous run is removed", func() {
 					Eventually(func() bool {
 						ok := false
-						if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(test), &konfirm.Test{}); err != nil {
+						if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(testRun), &konfirm.TestRun{}); err != nil {
 							ok = apierrors.IsNotFound(err)
 						}
 						return ok
-					}, "3s").Should(BeTrue())
-				})
-			})
-		})
-
-		When("the test suite is triggered", func() {
-
-			It("it should progress to the Running phase", func() {
-				Eventually(func(g Gomega) {
-					g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(testSuite), testSuite)).NotTo(HaveOccurred())
-					g.Expect(testSuite.Status.Phase).To(Equal(konfirm.TestSuiteRunning))
-					g.Expect(testSuite.Status.Conditions).To(HaveKey(And(
-						HaveField("Type", controllers.TestSuiteRunStartedCondition),
-						HaveField("Status", "True"),
-						HaveField("Reason", "Manual"),
-						HaveField("Message", "TestSuite was manually triggered"),
-					)))
+					}, timeout).Should(BeTrue())
 				})
 			})
 		})

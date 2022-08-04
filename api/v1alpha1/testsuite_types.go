@@ -17,11 +17,10 @@
 package v1alpha1
 
 import (
-	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// +kubebuilder:validate:enum=Pending;Ready;Running;Error
 // TestSuitePhase describes the phase a TestSuite is currently in
 type TestSuitePhase string
 
@@ -50,19 +49,6 @@ func (p TestSuitePhase) IsRunning() bool {
 // IsError returns true if TestSuitePhase is "Error"
 func (p TestSuitePhase) IsError() bool {
 	return p == TestSuitePending
-}
-
-// TestTemplate describes a templated Test
-type TestTemplate struct {
-
-	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:Required
-	Description string `json:"description"`
-
-	RetentionPolicy TestRetainPolicy `json:"retentionPolicy,omitempty"`
-
-	// +kubebuilder:validation:Required
-	Template v1.PodTemplateSpec `json:"template"`
 }
 
 // TestSuiteHelmTrigger describes a Helm release that will trigger a TestSuite
@@ -143,6 +129,14 @@ type TestSuiteList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []TestSuite `json:"items"`
+}
+
+func (l *TestSuiteList) GetObjects() []client.Object {
+	var objs = make([]client.Object, len(l.Items))
+	for i := range l.Items {
+		objs[i] = &l.Items[i]
+	}
+	return objs
 }
 
 func init() {

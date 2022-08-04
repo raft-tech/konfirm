@@ -23,8 +23,27 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// getTests is a helper function for retrieving Tests associated with a specified TestSuite
-func getTests(ctx context.Context, t *konfirm.TestSuite) ([]konfirm.Test, error) {
+// getTestRuns is a helper function for retrieving TestRuns associated with a specified TestSuite
+func getTestRuns(ctx context.Context, t *konfirm.TestSuite) ([]konfirm.TestRun, error) {
+	var testRuns []konfirm.TestRun
+	var err error
+	var testRunList konfirm.TestRunList
+	if err = k8sClient.List(ctx, &testRunList, client.InNamespace(t.Namespace)); err == nil {
+		for _, t := range testRunList.Items {
+			for _, o := range t.GetOwnerReferences() {
+				if o.APIVersion == konfirm.GroupVersion.String() &&
+					o.Kind == "TestSuite" &&
+					o.Name == t.Name {
+					testRuns = append(testRuns, t)
+				}
+			}
+		}
+	}
+	return testRuns, err
+}
+
+// getTests is a helper function for retrieving Tests associated with a specified TestRun
+func getTests(ctx context.Context, t *konfirm.TestRun) ([]konfirm.Test, error) {
 	var tests []konfirm.Test
 	var err error
 	var testList konfirm.TestList
@@ -32,7 +51,7 @@ func getTests(ctx context.Context, t *konfirm.TestSuite) ([]konfirm.Test, error)
 		for _, t := range testList.Items {
 			for _, o := range t.GetOwnerReferences() {
 				if o.APIVersion == konfirm.GroupVersion.String() &&
-					o.Kind == "TestSuite" &&
+					o.Kind == "TestRun" &&
 					o.Name == t.Name {
 					tests = append(tests, t)
 				}
