@@ -82,7 +82,7 @@ type TestSuiteSetUp struct {
 type TestSuiteSpec struct {
 
 	// +kubebuilder:default=OnFailure
-	RetentionPolicy TestRetainPolicy `json:"retentionPolicy,omitempty"`
+	RetentionPolicy RetainPolicy `json:"retentionPolicy,omitempty"`
 
 	SetUp TestSuiteSetUp `json:"setUp,omitempty"`
 

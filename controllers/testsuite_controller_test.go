@@ -34,11 +34,20 @@ var _ = Describe("TestSuite Controller", func() {
 
 	var (
 		ctx       context.Context
+		namespace string
 		testSuite *konfirm.TestSuite
 	)
 
 	BeforeEach(func() {
 		ctx = context.Background()
+		if ns, err := generateNamespace(); err == nil {
+			namespace = ns
+			Expect(k8sClient.Create(ctx, &v1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{Name: namespace},
+			})).NotTo(HaveOccurred())
+		} else {
+			Expect(err).NotTo(HaveOccurred())
+		}
 		testSuite = &konfirm.TestSuite{
 			TypeMeta: metav1.TypeMeta{
 				APIVersion: konfirm.GroupVersion.String(),
@@ -46,7 +55,7 @@ var _ = Describe("TestSuite Controller", func() {
 			},
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "a-test-suite",
-				Namespace: "default",
+				Namespace: namespace,
 			},
 			Spec: konfirm.TestSuiteSpec{
 				Tests: []konfirm.TestTemplate{

@@ -71,7 +71,7 @@ func (r *TestRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			logger.Debug("test run no longer exists")
 			return ctrl.Result{}, nil
 		}
-		logger.Info("error getting test run")
+		logger.Error(err, "error getting test run")
 		return ctrl.Result{
 			Requeue:      true,
 			RequeueAfter: time.Minute,
@@ -106,7 +106,7 @@ func (r *TestRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 				logger.Debug("test run no longer exists")
 				return ctrl.Result{}, nil
 			}
-			logger.Info("error patching status")
+			logger.Error(err, "error patching status")
 			return ctrl.Result{
 				Requeue:      true,
 				RequeueAfter: time.Minute,
@@ -129,7 +129,7 @@ func (r *TestRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		if len(tests.Items) > 0 {
 			logger.Trace("deleting tests")
 			if _, err := cleanUpAll(ctx, r.Client, TestRunControllerFinalizer, tests.GetObjects()); err != nil {
-				logger.Info("error removing tests")
+				logger.Error(err, "error removing tests")
 				return ctrl.Result{
 					Requeue:      true,
 					RequeueAfter: time.Minute,
@@ -139,7 +139,7 @@ func (r *TestRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		} else {
 			logger.Trace("removing finalizer if present")
 			if patched, err := removeFinalizer(ctx, r.Client, TestRunControllerFinalizer, &testRun); err != nil {
-				logger.Info("error removing finalizer")
+				logger.Error(err, "error removing finalizer")
 				return ctrl.Result{
 					Requeue:      true,
 					RequeueAfter: time.Minute,
@@ -191,7 +191,7 @@ func (r *TestRunReconciler) isRunning(ctx context.Context, testRun *konfirm.Test
 		if err != nil {
 			logger.Error(err, "invalid test name")
 			if _, err = cleanUp(ctx, r.Client, TestRunControllerFinalizer, &t); err != nil {
-				logger.Info("error cleaning up invalidly named test")
+				logger.Error(err, "error cleaning up invalidly named test")
 				return ctrl.Result{}, err
 			}
 		}
@@ -235,7 +235,7 @@ func (r *TestRunReconciler) isRunning(ctx context.Context, testRun *konfirm.Test
 			}
 			logger.Trace("creating test")
 			if err := r.Client.Create(ctx, test); err != nil {
-				logger.Info("error creating test")
+				logger.Error(err, "error creating test")
 				return ctrl.Result{
 					Requeue:      true,
 					RequeueAfter: time.Minute,
@@ -303,7 +303,7 @@ func (r *TestRunReconciler) isRunning(ctx context.Context, testRun *konfirm.Test
 		if err = client.IgnoreNotFound(err); err == nil {
 			logger.Debug("test run no longer exists")
 		} else {
-			logger.Info("error updating status")
+			logger.Error(err, "error updating status")
 			return ctrl.Result{
 				Requeue:      true,
 				RequeueAfter: time.Minute,

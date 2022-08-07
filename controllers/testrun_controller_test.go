@@ -28,12 +28,21 @@ import (
 
 var _ = Describe("TestRun Controller", func() {
 
-	const timeout = "100ms"
+	const timeout = "200ms"
 
 	var ctx context.Context
+	var namespace string
 
 	BeforeEach(func() {
 		ctx = context.Background()
+		if ns, err := generateNamespace(); err == nil {
+			namespace = ns
+			Expect(k8sClient.Create(ctx, &v1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{Name: namespace},
+			})).NotTo(HaveOccurred())
+		} else {
+			Expect(err).NotTo(HaveOccurred())
+		}
 	})
 
 	When("a TestRun is created", func() {
@@ -44,12 +53,24 @@ var _ = Describe("TestRun Controller", func() {
 			testRun = &konfirm.TestRun{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "a-testrun",
-					Namespace: "default",
+					Namespace: namespace,
 				},
 				Spec: konfirm.TestRunSpec{
 					Tests: []konfirm.TestTemplate{
 						{
-							Description: "a-test",
+							Description: "test1",
+							Template: v1.PodTemplateSpec{
+								Spec: v1.PodSpec{
+									Containers: []v1.Container{
+										{
+											Name:  "test",
+											Image: "konfirm/mock:v1",
+										},
+									},
+								},
+							},
+						}, {
+							Description: "test2",
 							Template: v1.PodTemplateSpec{
 								Spec: v1.PodSpec{
 									Containers: []v1.Container{
@@ -67,47 +88,119 @@ var _ = Describe("TestRun Controller", func() {
 			Expect(k8sClient.Create(ctx, testRun)).NotTo(HaveOccurred())
 		})
 
-		AfterEach(func() {
-
-			// No pods left
-			Eventually(func() ([]v1.Pod, error) {
-				var pods v1.PodList
-				if err := k8sClient.List(ctx, &pods); err == nil {
-					return pods.Items, nil
-				} else {
-					return nil, err
-				}
-			}, timeout).Should(BeEmpty())
-
-			// No tests left
-			Eventually(func() ([]konfirm.Test, error) {
-				var tests konfirm.TestList
-				if err := k8sClient.List(ctx, &tests); err == nil {
-					return tests.Items, nil
-				} else {
-					return nil, err
-				}
-			}, timeout).Should(BeEmpty())
-
-			// No test runs left
-			Eventually(func() ([]konfirm.TestRun, error) {
-				var testRuns konfirm.TestRunList
-				if err := k8sClient.List(ctx, &testRuns); err == nil {
-					return testRuns.Items, nil
-				} else {
-					return nil, err
-				}
-			}, timeout).Should(BeEmpty())
-		})
-
-		It("it progresses to Starting", func() {
+		It("it progresses to Running", func() {
 			Eventually(func() (phase konfirm.TestRunPhase, err error) {
 				if err = k8sClient.Get(ctx, client.ObjectKeyFromObject(testRun), testRun); err == nil {
 					phase = testRun.Status.Phase
 				}
 				return
-			}, timeout).Should(Equal(konfirm.TestRunStarting))
-			Expect(k8sClient.Delete(ctx, testRun)).NotTo(HaveOccurred())
+			}, timeout).Should(Equal(konfirm.TestRunRunning))
+		})
+
+		When("the pod(s) succeed", func() {
+
+			BeforeEach(func() {
+				Eventually(func() (bool, error) {
+
+					var test *konfirm.Test
+					var tests konfirm.TestList
+					if err := k8sClient.List(ctx, &tests, client.InNamespace(testRun.Namespace)); err == nil {
+						for i := range tests.Items {
+							for j := range tests.Items[i].OwnerReferences {
+								if o := &tests.Items[i].OwnerReferences[j]; o.UID == testRun.UID {
+									test = &tests.Items[i]
+									break
+								}
+							}
+							if test != nil {
+								break
+							}
+						}
+						if test == nil {
+							return false, nil
+						}
+					} else {
+						return false, err
+					}
+
+					var pods v1.PodList
+					if err := k8sClient.List(ctx, &pods, client.InNamespace(test.Namespace)); err == nil {
+						for i := range pods.Items {
+							for j := range pods.Items[i].OwnerReferences {
+								if o := &pods.Items[i].OwnerReferences[j]; o.UID == test.UID {
+									pod := &pods.Items[i]
+									orig := pod.DeepCopy()
+									pod.Status.Phase = v1.PodSucceeded
+									return true, k8sClient.Status().Patch(ctx, pod, client.MergeFrom(orig))
+								}
+							}
+						}
+					} else {
+						return false, err
+					}
+
+					return false, nil
+				}, timeout).Should(BeTrue())
+			})
+
+			It("it passes", func() {
+				Eventually(func() (konfirm.TestRunPhase, error) {
+					return testRun.Status.Phase, k8sClient.Get(ctx, client.ObjectKeyFromObject(testRun), testRun)
+				}, timeout).Should(Equal(konfirm.TestRunPassed))
+			})
+		})
+
+		When("the pod(s) fail", func() {
+
+			BeforeEach(func() {
+				Eventually(func() (bool, error) {
+
+					var test *konfirm.Test
+					var tests konfirm.TestList
+					if err := k8sClient.List(ctx, &tests, client.InNamespace(testRun.Namespace)); err == nil {
+						for i := range tests.Items {
+							for j := range tests.Items[i].OwnerReferences {
+								if o := &tests.Items[i].OwnerReferences[j]; o.UID == testRun.UID {
+									test = &tests.Items[i]
+									break
+								}
+							}
+							if test != nil {
+								break
+							}
+						}
+						if test == nil {
+							return false, nil
+						}
+					} else {
+						return false, err
+					}
+
+					var pods v1.PodList
+					if err := k8sClient.List(ctx, &pods, client.InNamespace(test.Namespace)); err == nil {
+						for i := range pods.Items {
+							for j := range pods.Items[i].OwnerReferences {
+								if o := &pods.Items[i].OwnerReferences[j]; o.UID == test.UID {
+									pod := &pods.Items[i]
+									orig := pod.DeepCopy()
+									pod.Status.Phase = v1.PodFailed
+									return true, k8sClient.Status().Patch(ctx, pod, client.MergeFrom(orig))
+								}
+							}
+						}
+					} else {
+						return false, err
+					}
+
+					return false, nil
+				}, timeout).Should(BeTrue())
+			})
+
+			It("it fails", func() {
+				Eventually(func() (konfirm.TestRunPhase, error) {
+					return testRun.Status.Phase, k8sClient.Get(ctx, client.ObjectKeyFromObject(testRun), testRun)
+				}, timeout).Should(Equal(konfirm.TestRunFailed))
+			})
 		})
 	})
 })

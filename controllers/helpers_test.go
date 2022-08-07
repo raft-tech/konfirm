@@ -23,6 +23,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+var (
+	//yes = true
+	no = false
+)
+
 // getTestRuns is a helper function for retrieving TestRuns associated with a specified TestSuite
 func getTestRuns(ctx context.Context, t *konfirm.TestSuite) ([]konfirm.TestRun, error) {
 	var testRuns []konfirm.TestRun

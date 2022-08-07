@@ -39,7 +39,7 @@ func (t TestRunPhase) IsFinal() bool {
 type TestRunSpec struct {
 
 	// +kubebuilder:default=OnFailure
-	RetentionPolicy TestRetainPolicy `json:"retentionPolicy,omitempty"`
+	RetentionPolicy RetainPolicy `json:"retentionPolicy,omitempty"`
 
 	// +kubebuilder:validation:MinItems=1
 	Tests []TestTemplate `json:"templates"`

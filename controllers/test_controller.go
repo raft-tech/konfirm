@@ -193,7 +193,7 @@ func (r *TestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 			Type:               TestCompletedCondition,
 			Status:             "True",
 			ObservedGeneration: test.Generation,
-			Reason:             "PodComplete",
+			Reason:             "PodCompleted",
 			Message:            fmt.Sprintf("pod %s/%s has completed", pod.Namespace, pod.Name),
 		})
 		test.Status.Messages = make(map[string]string)
@@ -207,7 +207,7 @@ func (r *TestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 			Type:               TestCompletedCondition,
 			Status:             "False",
 			ObservedGeneration: test.Generation,
-			Reason:             "PodNotComplete",
+			Reason:             "PodNotCompleted",
 			Message:            fmt.Sprintf("pod %s/%s has not completed", pod.Namespace, pod.Name),
 		})
 	}

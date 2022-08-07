@@ -23,12 +23,12 @@ import (
 )
 
 // +kubebuilder:validation:Enum=Always;Never;OnFailure
-type TestRetainPolicy string
+type RetainPolicy string
 
 const (
-	RetainAlways    TestRetainPolicy = "Always"
-	RetainNever     TestRetainPolicy = "Never"
-	RetainOnFailure TestRetainPolicy = "OnFailure"
+	RetainAlways    RetainPolicy = "Always"
+	RetainNever     RetainPolicy = "Never"
+	RetainOnFailure RetainPolicy = "OnFailure"
 )
 
 // TestTemplate describes a templated Test
@@ -38,7 +38,7 @@ type TestTemplate struct {
 	// +kubebuilder:validation:Required
 	Description string `json:"description"`
 
-	RetentionPolicy TestRetainPolicy `json:"retentionPolicy,omitempty"`
+	RetentionPolicy RetainPolicy `json:"retentionPolicy,omitempty"`
 
 	// +kubebuilder:validation:Required
 	Template v1.PodTemplateSpec `json:"template"`
@@ -49,7 +49,7 @@ type TestSpec struct {
 
 	// +kubebuilder:default=OnFailure
 	// RetentionPolicy specifies how generated resources should be handled after the Test finishes.
-	RetentionPolicy TestRetainPolicy `json:"retentionPolicy,omitempty"`
+	RetentionPolicy RetainPolicy `json:"retentionPolicy,omitempty"`
 
 	// Template is the PodSpecTemplate that will be used to run the test
 	Template v1.PodTemplateSpec `json:"template"`

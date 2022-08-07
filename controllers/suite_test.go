@@ -18,9 +18,13 @@ package controllers_test
 
 import (
 	"context"
+	"errors"
 	"github.com/onsi/ginkgo/config"
+	"math"
+	"math/rand"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/raft-tech/konfirm/controllers"
@@ -51,6 +55,7 @@ var (
 	testEnv   *envtest.Environment
 	mgrCtx    context.Context
 	mgrCancel context.CancelFunc
+	trand     *rand.Rand
 )
 
 func TestAPIs(t *testing.T) {
@@ -137,6 +142,9 @@ var _ = BeforeSuite(func() {
 		Expect(err).NotTo(HaveOccurred())
 	}()
 
+	// Seeded randomness generator
+	trand = rand.New(rand.NewSource(GinkgoRandomSeed()))
+
 }, 60)
 
 var _ = AfterSuite(func() {
@@ -145,3 +153,31 @@ var _ = AfterSuite(func() {
 	err := testEnv.Stop()
 	Expect(err).NotTo(HaveOccurred())
 })
+
+var namespaceAlphabet = []rune("abcdefghijklmnopqrstuvwxyz0123456789")
+
+// generateNamespace generates a pseudorandom namespace name using trand
+func generateNamespace() (string, error) {
+
+	n := 6
+	k := len(namespaceAlphabet)
+	m := k * (int(math.Floor(256 / float64(k)))) // Random values >= m must be discarded for uniformity
+	ns := &strings.Builder{}
+	src := make([]byte, n)
+
+	for pos := 0; pos < n; {
+		src = src[:n-pos]
+		if _, e := trand.Read(src); e != nil {
+			return "", errors.New("error reading from random source") // Never return a partial ID
+		}
+		for i := 0; i < len(src); i++ {
+			j := int(src[i])
+			if j < m {
+				ns.WriteRune(namespaceAlphabet[j%k])
+				pos++
+			}
+		}
+	}
+
+	return ns.String(), nil
+}
