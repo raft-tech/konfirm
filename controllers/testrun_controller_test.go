@@ -28,7 +28,7 @@ import (
 
 var _ = Describe("TestRun Controller", func() {
 
-	const timeout = "200ms"
+	const timeout = "100ms"
 
 	var ctx context.Context
 	var namespace string
@@ -58,19 +58,7 @@ var _ = Describe("TestRun Controller", func() {
 				Spec: konfirm.TestRunSpec{
 					Tests: []konfirm.TestTemplate{
 						{
-							Description: "test1",
-							Template: v1.PodTemplateSpec{
-								Spec: v1.PodSpec{
-									Containers: []v1.Container{
-										{
-											Name:  "test",
-											Image: "konfirm/mock:v1",
-										},
-									},
-								},
-							},
-						}, {
-							Description: "test2",
+							Description: "test",
 							Template: v1.PodTemplateSpec{
 								Spec: v1.PodSpec{
 									Containers: []v1.Container{
@@ -85,7 +73,15 @@ var _ = Describe("TestRun Controller", func() {
 					},
 				},
 			}
+		})
+
+		JustBeforeEach(func() {
 			Expect(k8sClient.Create(ctx, testRun)).NotTo(HaveOccurred())
+		})
+
+		AfterEach(func() {
+			err := k8sClient.Delete(ctx, testRun)
+			Expect(client.IgnoreNotFound(err)).NotTo(HaveOccurred())
 		})
 
 		It("it progresses to Running", func() {
@@ -95,51 +91,39 @@ var _ = Describe("TestRun Controller", func() {
 				}
 				return
 			}, timeout).Should(Equal(konfirm.TestRunRunning))
+			Expect(testRun.Status.Conditions).To(ContainElement(And(
+				HaveField("Type", "RunStarted"),
+				HaveField("Status", metav1.ConditionTrue),
+				HaveField("Reason", "TestRunStarted"),
+			)))
+			Expect(testRun.Status.Conditions).To(ContainElement(And(
+				HaveField("Type", "RunCompleted"),
+				HaveField("Status", metav1.ConditionFalse),
+				HaveField("Reason", "TestRunInProgress"),
+			)))
 		})
 
 		When("the pod(s) succeed", func() {
 
-			BeforeEach(func() {
-				Eventually(func() (bool, error) {
-
-					var test *konfirm.Test
-					var tests konfirm.TestList
-					if err := k8sClient.List(ctx, &tests, client.InNamespace(testRun.Namespace)); err == nil {
-						for i := range tests.Items {
-							for j := range tests.Items[i].OwnerReferences {
-								if o := &tests.Items[i].OwnerReferences[j]; o.UID == testRun.UID {
-									test = &tests.Items[i]
-									break
-								}
-							}
-							if test != nil {
-								break
-							}
-						}
-						if test == nil {
-							return false, nil
-						}
-					} else {
-						return false, err
+			JustBeforeEach(func() {
+				Eventually(func() (ok bool, err error) {
+					var tests []konfirm.Test
+					if tests, err = getTests(ctx, testRun); err != nil || len(tests) == 0 {
+						return
 					}
-
-					var pods v1.PodList
-					if err := k8sClient.List(ctx, &pods, client.InNamespace(test.Namespace)); err == nil {
-						for i := range pods.Items {
-							for j := range pods.Items[i].OwnerReferences {
-								if o := &pods.Items[i].OwnerReferences[j]; o.UID == test.UID {
-									pod := &pods.Items[i]
-									orig := pod.DeepCopy()
-									pod.Status.Phase = v1.PodSucceeded
-									return true, k8sClient.Status().Patch(ctx, pod, client.MergeFrom(orig))
-								}
+					for i := range tests {
+						var pods []v1.Pod
+						if pods, err = getPods(ctx, &tests[i]); err != nil || len(pods) == 0 {
+							return
+						}
+						for j := range pods {
+							if err = succeed(ctx, &pods[j]); err != nil {
+								return
 							}
 						}
-					} else {
-						return false, err
 					}
-
-					return false, nil
+					ok = true
+					return
 				}, timeout).Should(BeTrue())
 			})
 
@@ -147,52 +131,85 @@ var _ = Describe("TestRun Controller", func() {
 				Eventually(func() (konfirm.TestRunPhase, error) {
 					return testRun.Status.Phase, k8sClient.Get(ctx, client.ObjectKeyFromObject(testRun), testRun)
 				}, timeout).Should(Equal(konfirm.TestRunPassed))
+				Expect(testRun.Status.Conditions).To(ContainElement(And(
+					HaveField("Type", "RunStarted"),
+					HaveField("Status", metav1.ConditionTrue),
+					HaveField("Reason", "TestRunStarted"),
+				)))
+				Expect(testRun.Status.Conditions).To(ContainElement(And(
+					HaveField("Type", "RunCompleted"),
+					HaveField("Status", metav1.ConditionTrue),
+					HaveField("Reason", "TestRunPassed"),
+				)))
+			})
+
+			It("it deletes the tests", func() {
+				Eventually(func() ([]konfirm.Test, error) {
+					return getTests(ctx, testRun)
+				}, timeout).Should(BeEmpty())
+			})
+
+			When("the retention policy is Always", func() {
+
+				BeforeEach(func() {
+					testRun.Spec.RetentionPolicy = konfirm.RetainAlways
+				})
+
+				It("it retains the test(s)", func() {
+					Consistently(func() ([]konfirm.Test, error) {
+						return getTests(ctx, testRun)
+					}, timeout).Should(HaveLen(len(testRun.Spec.Tests)))
+				})
+			})
+
+			When("the retention policy is Never", func() {
+
+				BeforeEach(func() {
+					testRun.Spec.RetentionPolicy = konfirm.RetainNever
+				})
+
+				It("it deletes the tests", func() {
+					Eventually(func() ([]konfirm.Test, error) {
+						return getTests(ctx, testRun)
+					}, timeout).Should(BeEmpty())
+				})
+			})
+
+			When("the retention policy is On Failure", func() {
+
+				BeforeEach(func() {
+					testRun.Spec.RetentionPolicy = konfirm.RetainOnFailure
+				})
+
+				It("it deletes the tests", func() {
+					Eventually(func() ([]konfirm.Test, error) {
+						return getTests(ctx, testRun)
+					}, timeout).Should(BeEmpty())
+				})
 			})
 		})
 
 		When("the pod(s) fail", func() {
 
-			BeforeEach(func() {
-				Eventually(func() (bool, error) {
-
-					var test *konfirm.Test
-					var tests konfirm.TestList
-					if err := k8sClient.List(ctx, &tests, client.InNamespace(testRun.Namespace)); err == nil {
-						for i := range tests.Items {
-							for j := range tests.Items[i].OwnerReferences {
-								if o := &tests.Items[i].OwnerReferences[j]; o.UID == testRun.UID {
-									test = &tests.Items[i]
-									break
-								}
-							}
-							if test != nil {
-								break
-							}
-						}
-						if test == nil {
-							return false, nil
-						}
-					} else {
-						return false, err
+			JustBeforeEach(func() {
+				Eventually(func() (ok bool, err error) {
+					var tests []konfirm.Test
+					if tests, err = getTests(ctx, testRun); err != nil || len(tests) == 0 {
+						return
 					}
-
-					var pods v1.PodList
-					if err := k8sClient.List(ctx, &pods, client.InNamespace(test.Namespace)); err == nil {
-						for i := range pods.Items {
-							for j := range pods.Items[i].OwnerReferences {
-								if o := &pods.Items[i].OwnerReferences[j]; o.UID == test.UID {
-									pod := &pods.Items[i]
-									orig := pod.DeepCopy()
-									pod.Status.Phase = v1.PodFailed
-									return true, k8sClient.Status().Patch(ctx, pod, client.MergeFrom(orig))
-								}
+					for i := range tests {
+						var pods []v1.Pod
+						if pods, err = getPods(ctx, &tests[i]); err != nil || len(pods) == 0 {
+							return
+						}
+						for j := range pods {
+							if err = fail(ctx, &pods[j]); err != nil {
+								return
 							}
 						}
-					} else {
-						return false, err
 					}
-
-					return false, nil
+					ok = true
+					return
 				}, timeout).Should(BeTrue())
 			})
 
@@ -200,6 +217,61 @@ var _ = Describe("TestRun Controller", func() {
 				Eventually(func() (konfirm.TestRunPhase, error) {
 					return testRun.Status.Phase, k8sClient.Get(ctx, client.ObjectKeyFromObject(testRun), testRun)
 				}, timeout).Should(Equal(konfirm.TestRunFailed))
+				Expect(testRun.Status.Conditions).To(ContainElement(And(
+					HaveField("Type", "RunStarted"),
+					HaveField("Status", metav1.ConditionTrue),
+					HaveField("Reason", "TestRunStarted"),
+				)))
+				Expect(testRun.Status.Conditions).To(ContainElement(And(
+					HaveField("Type", "RunCompleted"),
+					HaveField("Status", metav1.ConditionTrue),
+					HaveField("Reason", "TestRunFailed"),
+				)))
+			})
+
+			It("it retains the tests", func() {
+				Consistently(func() ([]konfirm.Test, error) {
+					return getTests(ctx, testRun)
+				}, timeout).Should(HaveLen(len(testRun.Spec.Tests)))
+			})
+
+			When("the retention policy is Always", func() {
+
+				BeforeEach(func() {
+					testRun.Spec.RetentionPolicy = konfirm.RetainAlways
+				})
+
+				It("it retains the test(s)", func() {
+					Consistently(func() ([]konfirm.Test, error) {
+						return getTests(ctx, testRun)
+					}, timeout).Should(HaveLen(len(testRun.Spec.Tests)))
+				})
+			})
+
+			When("the retention policy is Never", func() {
+
+				BeforeEach(func() {
+					testRun.Spec.RetentionPolicy = konfirm.RetainNever
+				})
+
+				It("it deletes the tests", func() {
+					Eventually(func() ([]konfirm.Test, error) {
+						return getTests(ctx, testRun)
+					}, timeout).Should(BeEmpty())
+				})
+			})
+
+			When("the retention policy is On Failure", func() {
+
+				BeforeEach(func() {
+					testRun.Spec.RetentionPolicy = konfirm.RetainOnFailure
+				})
+
+				It("it retains the tests", func() {
+					Consistently(func() ([]konfirm.Test, error) {
+						return getTests(ctx, testRun)
+					}, timeout).Should(HaveLen(len(testRun.Spec.Tests)))
+				})
 			})
 		})
 	})

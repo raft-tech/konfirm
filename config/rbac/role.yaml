@@ -26,13 +26,6 @@ rules:
 - apiGroups:
   - ""
   resources:
-  - pods/finalizers
-  verbs:
-  - patch
-  - update
-- apiGroups:
-  - ""
-  resources:
   - pods/status
   verbs:
   - get
@@ -62,13 +55,13 @@ rules:
   verbs:
   - get
   - patch
-  - update
 - apiGroups:
   - konfirm.goraft.tech
   resources:
   - tests
   verbs:
   - create
+  - delete
   - get
   - list
   - patch

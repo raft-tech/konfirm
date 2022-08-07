@@ -42,7 +42,7 @@ type TestRunSpec struct {
 	RetentionPolicy RetainPolicy `json:"retentionPolicy,omitempty"`
 
 	// +kubebuilder:validation:MinItems=1
-	Tests []TestTemplate `json:"templates"`
+	Tests []TestTemplate `json:"tests"`
 }
 
 // TestResult describes the outcome of a completed Test

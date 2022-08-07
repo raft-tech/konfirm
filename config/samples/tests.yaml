@@ -1,48 +1,35 @@
 apiVersion: konfirm.goraft.tech/v1alpha1
-kind: TestSuite
+kind: TestRun
 metadata:
   name: sample
 spec:
-  retentionPolicy: Always
-  setUp:
-    helm:
-      secret: test-suite-setup
-      chartKey: chart
-      valuesKey: values
   tests:
-    - description: This should always pass
-      retentionPolicy: OnFailure
+    - description: Generals gathered in their masses
       template:
         spec:
           containers:
-            - name: pass
+            - name: test
               image: konfirm/mock:v0.1.0
-              args:
-                - '"Generals gathered in their masses"'
-    - description: This should pass but retain the pod
+    - description: Just like witches at black masses
       template:
         spec:
           containers:
-            - name: pass
+            - name: test
               image: konfirm/mock:v0.1.0
-              args:
-                - '"Just like witches at black masses"'
-    - description: This should fail and not retain the pod
-      retentionPolicy: Never
+    - description: Evil minds that plot destruction
       template:
         spec:
           containers:
-            - name: fail
+            - name: test
               image: konfirm/mock:v0.1.0
               args:
                 - "--fail"
-                - '"Evil minds that plot destruction"'
-    - description: This should fail and retain the pod
+    - description: Sorcerer of death's construction
       template:
         spec:
           containers:
-            - name: fail
+            - name: test
               image: konfirm/mock:v0.1.0
               args:
                 - "--fail"
-                - "\"Sorcerer of death's construction\""
+                - "by Black Sabbath"

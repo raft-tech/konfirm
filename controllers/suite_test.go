@@ -20,17 +20,16 @@ import (
 	"context"
 	"errors"
 	"github.com/onsi/ginkgo/config"
+	"github.com/raft-tech/konfirm/controllers"
+	"github.com/raft-tech/konfirm/logging"
+	"go.uber.org/zap/zapcore"
 	"math"
 	"math/rand"
 	"os"
 	"path/filepath"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"strings"
 	"testing"
-
-	"github.com/raft-tech/konfirm/controllers"
-	"github.com/raft-tech/konfirm/logging"
-	"go.uber.org/zap/zapcore"
-	ctrl "sigs.k8s.io/controller-runtime"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -79,7 +78,7 @@ var _ = BeforeSuite(func() {
 		logging.EncoderLevel(logging.CapitalLevelEncoder),
 		func(o *zap.Options) {
 			o.EncoderConfigOptions = append(o.EncoderConfigOptions, func(config *zapcore.EncoderConfig) {
-				config.EncodeTime = zapcore.RFC3339TimeEncoder
+				config.EncodeTime = zapcore.ISO8601TimeEncoder
 			})
 		}))
 

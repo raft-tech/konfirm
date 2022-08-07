@@ -19,6 +19,7 @@ package main
 import (
 	"flag"
 	"os"
+	"time"
 
 	"github.com/raft-tech/konfirm/logging"
 
@@ -100,9 +101,10 @@ func main() {
 		os.Exit(1)
 	}
 	if err = (&controllers.TestRunReconciler{
-		Client:   mgr.GetClient(),
-		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("testrun-controller"),
+		Client:          mgr.GetClient(),
+		Scheme:          mgr.GetScheme(),
+		Recorder:        mgr.GetEventRecorderFor("testrun-controller"),
+		ErrRequeueDelay: time.Minute,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "TestRun")
 		os.Exit(1)

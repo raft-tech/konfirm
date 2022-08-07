@@ -101,10 +101,6 @@ kind-push: docker-build ## Push manager image to kind cluster
 kind-push-mock: docker-build-mock ## Push mock image to kind cluster
 	kind load docker-image ${MOCK_IMG} --name="konfirm"
 
-.PHONY: kind-deploy
-kind-deploy: kind kind-push kind-push-mock install deploy
-	kubectl apply -f config/samples
-
 ##@ Deployment
 
 ifndef ignore-not-found

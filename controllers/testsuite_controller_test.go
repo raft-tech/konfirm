@@ -77,45 +77,6 @@ var _ = Describe("TestSuite Controller", func() {
 		}
 	})
 
-	AfterEach(func() {
-
-		// All pods are gone
-		Eventually(func() ([]v1.Pod, error) {
-			var pods v1.PodList
-			if err := k8sClient.List(ctx, &pods); err == nil {
-				return pods.Items, nil
-			} else {
-				return nil, err
-			}
-		}, timeout).Should(BeEmpty())
-
-		// All tests are gone
-		Eventually(func() ([]konfirm.Test, error) {
-			var tests konfirm.TestList
-			if err := k8sClient.List(ctx, &tests); err == nil {
-				return tests.Items, nil
-			} else {
-				return nil, err
-			}
-		}, timeout).Should(BeEmpty())
-
-		// All test runs are gone
-		Eventually(func() ([]konfirm.TestRun, error) {
-			var testRuns konfirm.TestRunList
-			if err := k8sClient.List(ctx, &testRuns); err == nil {
-				return testRuns.Items, nil
-			} else {
-				return nil, err
-			}
-		}, timeout).Should(BeEmpty())
-
-		// All test suites are gone
-		Eventually(func() ([]konfirm.TestSuite, error) {
-			testsuites := konfirm.TestSuiteList{}
-			return testsuites.Items, k8sClient.List(ctx, &testsuites)
-		}, timeout).Should(BeEmpty(), "not all TestSuites were removed")
-	})
-
 	When("a test suite is created", func() {
 
 		BeforeEach(func() {

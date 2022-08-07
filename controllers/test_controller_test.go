@@ -31,7 +31,7 @@ import (
 	"time"
 )
 
-var _ = FDescribe("On Test Controller reconciliation", func() {
+var _ = Describe("On Test Controller reconciliation", func() {
 
 	const (
 		timeout = "100ms"
@@ -88,6 +88,13 @@ var _ = FDescribe("On Test Controller reconciliation", func() {
 
 		JustBeforeEach(func() {
 			Expect(k8sClient.Create(ctx, test)).NotTo(HaveOccurred())
+		})
+
+		AfterEach(func() {
+			if test.DeletionTimestamp == nil {
+				err := k8sClient.Delete(ctx, test)
+				Expect(client.IgnoreNotFound(err)).NotTo(HaveOccurred())
+			}
 		})
 
 		It("an associated pod should be created", func() {
@@ -369,6 +376,28 @@ var _ = FDescribe("On Test Controller reconciliation", func() {
 							return apierrors.IsNotFound(err)
 						}, timeout).Should(BeFalse())
 					})
+				})
+			})
+
+			When("the test is deleted", func() {
+
+				JustBeforeEach(func() {
+					err := k8sClient.Delete(ctx, test)
+					Expect(err).NotTo(HaveOccurred())
+				})
+
+				It("the pod should be deleted", func() {
+					Eventually(func() bool {
+						err := k8sClient.Get(ctx, client.ObjectKeyFromObject(pod), &v1.Pod{})
+						return apierrors.IsNotFound(err)
+					}, timeout).Should(BeTrue())
+				})
+
+				It("the test should be deleted", func() {
+					Eventually(func() bool {
+						err := k8sClient.Get(ctx, client.ObjectKeyFromObject(test), &konfirm.Test{})
+						return apierrors.IsNotFound(err)
+					}, timeout).Should(BeTrue())
 				})
 			})
 		})

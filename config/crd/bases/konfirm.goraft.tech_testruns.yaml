@@ -42,7 +42,7 @@ spec:
                 - Never
                 - OnFailure
                 type: string
-              templates:
+              tests:
                 items:
                   description: TestTemplate describes a templated Test
                   properties:
@@ -7692,7 +7692,7 @@ spec:
                 minItems: 1
                 type: array
             required:
-            - templates
+            - tests
             type: object
           status:
             description: TestRunStatus defines the observed state of TestRun
