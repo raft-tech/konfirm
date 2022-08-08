@@ -15,7 +15,14 @@ spec:
     singular: testrun
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Status
+      type: string
+    - jsonPath: .status.message
+      name: Message
+      type: string
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         description: TestRun is the Schema for the testruns API
@@ -7766,6 +7773,9 @@ spec:
                   - type
                   type: object
                 type: array
+              message:
+                description: Message
+                type: string
               phase:
                 default: Pending
                 description: Phase (Pending, Starting, Passed, Failed)
@@ -7775,14 +7785,12 @@ spec:
                 items:
                   description: TestResult describes the outcome of a completed Test
                   properties:
+                    description:
+                      type: string
                     passed:
                       type: boolean
                     test:
-                      minLength: 1
                       type: string
-                  required:
-                  - passed
-                  - test
                   type: object
                 type: array
             type: object

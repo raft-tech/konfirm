@@ -107,6 +107,7 @@ func (r *TestRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if testRun.Status.Phase == "" {
 		orig := testRun.DeepCopy()
 		testRun.Status.Phase = konfirm.TestRunStarting
+		testRun.Status.Message = "Test Run is starting"
 		logger.Trace("patching test run phase to Starting")
 		if err := r.Client.Status().Patch(ctx, &testRun, client.MergeFrom(orig)); err != nil {
 			if err := client.IgnoreNotFound(err); err == nil {
@@ -117,7 +118,7 @@ func (r *TestRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			return ctrl.Result{Requeue: true, RequeueAfter: r.ErrRequeueDelay}, err
 		}
 		logger.Debug("test run Starting")
-		r.Recorder.Event(&testRun, "Normal", "TestRunCreated", "Test Run is starting")
+		r.Recorder.Event(&testRun, "Normal", "TestRunCreated", testRun.Status.Message)
 	}
 
 	// Handle deleted test runs
@@ -233,6 +234,7 @@ func (r *TestRunReconciler) isRunning(ctx context.Context, testRun *konfirm.Test
 				completions++
 				result := konfirm.TestResult{
 					Description: testRun.Spec.Tests[i].Description,
+					Test:        test.Name,
 				}
 				if test.Status.Phase.IsSuccess() {
 					result.Passed = true
@@ -246,8 +248,9 @@ func (r *TestRunReconciler) isRunning(ctx context.Context, testRun *konfirm.Test
 	}
 
 	// TestRun is in progress
-	if len(mapped) != completions {
+	if count := len(mapped); count != completions {
 		testRun.Status.Phase = konfirm.TestRunRunning
+		testRun.Status.Message = fmt.Sprintf("%d test(s) in progress. %d test(s) passed. %d test(s) failed.", count-completions, passes, failures)
 		meta.SetStatusCondition(&testRun.Status.Conditions, metav1.Condition{
 			Type:               TestRunStartedCondition,
 			Status:             metav1.ConditionTrue,
@@ -260,7 +263,7 @@ func (r *TestRunReconciler) isRunning(ctx context.Context, testRun *konfirm.Test
 			Status:             metav1.ConditionFalse,
 			ObservedGeneration: testRun.Generation,
 			Reason:             "TestRunInProgress",
-			Message:            "Test run is in progress",
+			Message:            "Test run is executing",
 		})
 		if orig.Status.Phase == konfirm.TestRunStarting {
 			logger.Trace("progressing test run to Running")
@@ -279,26 +282,28 @@ func (r *TestRunReconciler) isRunning(ctx context.Context, testRun *konfirm.Test
 	// Test run is complete
 	if failures == 0 {
 		testRun.Status.Phase = konfirm.TestRunPassed
+		testRun.Status.Message = fmt.Sprintf("%d of %d tests passed", failures, completions)
 		meta.SetStatusCondition(&testRun.Status.Conditions, metav1.Condition{
 			Type:               TestRunCompletedCondition,
 			Status:             metav1.ConditionTrue,
 			ObservedGeneration: testRun.Generation,
 			Reason:             "TestRunPassed",
-			Message:            fmt.Sprintf("%d/%d tests passed", failures, completions),
+			Message:            testRun.Status.Message,
 		})
 		logger.Trace("progressing test run to Passed")
-		r.Recorder.Event(testRun, "Normal", "TestRunPassed", "All tests passed")
+		r.Recorder.Event(testRun, "Normal", "TestRunPassed", testRun.Status.Message)
 	} else {
 		testRun.Status.Phase = konfirm.TestRunFailed
+		testRun.Status.Message = fmt.Sprintf("%d of %d tests failed", failures, completions)
 		meta.SetStatusCondition(&testRun.Status.Conditions, metav1.Condition{
 			Type:               TestRunCompletedCondition,
 			Status:             metav1.ConditionTrue,
 			ObservedGeneration: testRun.Generation,
 			Reason:             "TestRunFailed",
-			Message:            fmt.Sprintf("%d/%d tests failed", failures, completions),
+			Message:            testRun.Status.Message,
 		})
 		logger.Trace("progressing test run to Failed")
-		r.Recorder.Eventf(testRun, "Warning", "TestRunFailed", "%d of %d tests failed", failures, completions)
+		r.Recorder.Event(testRun, "Warning", "TestRunFailed", testRun.Status.Message)
 	}
 
 	if err := r.Client.Status().Patch(ctx, testRun, client.MergeFrom(orig)); err == nil {

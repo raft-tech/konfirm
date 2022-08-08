@@ -84,10 +84,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	recorder := mgr.GetEventRecorderFor("konfirm")
 	if err = (&controllers.TestReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("test-controller"),
+		Recorder: recorder,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Test")
 		os.Exit(1)
@@ -95,7 +96,7 @@ func main() {
 	if err = (&controllers.TestSuiteReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("testsuite-controller"),
+		Recorder: recorder,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "TestSuite")
 		os.Exit(1)
@@ -103,7 +104,7 @@ func main() {
 	if err = (&controllers.TestRunReconciler{
 		Client:          mgr.GetClient(),
 		Scheme:          mgr.GetScheme(),
-		Recorder:        mgr.GetEventRecorderFor("testrun-controller"),
+		Recorder:        recorder,
 		ErrRequeueDelay: time.Minute,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "TestRun")

@@ -47,12 +47,9 @@ type TestRunSpec struct {
 
 // TestResult describes the outcome of a completed Test
 type TestResult struct {
-
-	// +kubebuilder:validation:MinLength=1
-	Description string `json:"test"`
-
-	// +kubebuilder:validation:Required
-	Passed bool `json:"passed"`
+	Description string `json:"description,omitempty"`
+	Passed      bool   `json:"passed,omitempty"`
+	Test        string `json:"test,omitempty"`
 }
 
 // TestRunStatus defines the observed state of TestRun
@@ -65,12 +62,17 @@ type TestRunStatus struct {
 	// Phase (Pending, Starting, Passed, Failed)
 	Phase TestRunPhase `json:"phase,omitempty"`
 
+	// Message
+	Message string `json:"message,omitempty"`
+
 	// Results
 	Results []TestResult `json:"results,omitempty"`
 }
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
+//+kubebuilder:printcolumn:name="Status",type=string,JSONPath=`.status.phase`
+//+kubebuilder:printcolumn:name="Message",type=string,JSONPath=`.status.message`
 
 // TestRun is the Schema for the testruns API
 type TestRun struct {

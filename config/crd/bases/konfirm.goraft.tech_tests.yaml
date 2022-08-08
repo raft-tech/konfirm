@@ -15,7 +15,11 @@ spec:
     singular: test
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Status
+      type: string
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         description: Test is the Schema for the tests API
