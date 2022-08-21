@@ -19,7 +19,7 @@ package controllers
 import (
 	"context"
 	"fmt"
-	konfirmv1alpha1 "github.com/raft-tech/konfirm/api/v1alpha1"
+	konfirm "github.com/raft-tech/konfirm/api/v1alpha1"
 	"github.com/raft-tech/konfirm/logging"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -28,6 +28,7 @@ import (
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"time"
 )
 
 const (
@@ -35,18 +36,18 @@ const (
 	PodCreatedCondition     = "PodCreated"
 	TestCompletedCondition  = "TestCompleted"
 	TestStartingEvent       = "PodCreated"
-	TestRunningEvent        = "PodRunning"
 	TestPassedEvent         = "TestPassed"
 	TestFailedEvent         = "TestFailed"
 	TestErrorEvent          = "ErrorCreatingPod"
-	TestControllerFinalizer = konfirmv1alpha1.GroupName + "/test-controller"
+	TestControllerFinalizer = konfirm.GroupName + "/test-controller"
 )
 
 // TestReconciler reconciles a Test object
 type TestReconciler struct {
 	client.Client
-	Scheme   *runtime.Scheme
-	Recorder record.EventRecorder
+	Scheme        *runtime.Scheme
+	Recorder      record.EventRecorder
+	ErrRequeDelay time.Duration
 }
 
 //+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=tests,verbs=get;list;watch
@@ -57,255 +58,390 @@ type TestReconciler struct {
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
-// TODO: Do not log returned errors, they will be logged by the calling function
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.11.2/pkg/reconcile
-func (r *TestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *TestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ctrl.Result, err error) {
 
-	// TODO Reconsider the logical flow of TestReconciler based on lessons learned (e.g., when to remove finalizers)
 	// TODO Add finalizer to Test to ensure pod is deleted when test is deleted
 
 	logger := logging.FromContextWithName(ctx, "test-controller")
-	logger.DebugL().Info("starting test reconciliation")
+	logger.Debug("starting test reconciliation")
 
 	// Retrieve the subject Test
-	logger.TraceL().Info("getting test")
-	var test konfirmv1alpha1.Test
-	if err := r.Get(ctx, req.NamespacedName, &test); err != nil {
-		err = client.IgnoreNotFound(err)
-		if err != nil {
-			logger.Error(err, "error getting test")
-		} else {
-			logger.DebugL().Info("test no longer exists")
+	logger.Trace("getting test")
+	var test konfirm.Test
+	if err = r.Get(ctx, req.NamespacedName, &test); err != nil {
+		if err = client.IgnoreNotFound(err); err != nil {
+			logger.Info("error getting test")
+			res = ctrl.Result{
+				Requeue:      true,
+				RequeueAfter: r.ErrRequeDelay,
+			}
+			return
 		}
-		return ctrl.Result{}, err
+		logger.Debug("test no longer exists")
+		return
 	}
-	logger = logger.WithValues("generation", test.Generation)
-	logger.TraceL().Info("retrieved test")
-
-	// If Test status is empty, make pending
-	if test.Status.Phase == "" {
-		logger.TraceL().Info("patching status")
-		orig := test.DeepCopy()
-		test.Status.Phase = konfirmv1alpha1.TestPending
-		err := r.Client.Status().Patch(ctx, &test, client.MergeFrom(orig))
-		if err == nil {
-			logger.DebugL().Info("status patched", "phase", test.Status.Phase)
-		} else {
-			logger.Info("error patching status")
-		}
-		return ctrl.Result{}, err
-	}
+	logger.Trace("retrieved test")
 
 	// Retrieve any controlled pods
-	logger.TraceL().Info("getting pods")
+	logger.Trace("getting pods")
 	var pods v1.PodList
-	if err := r.List(ctx, &pods, client.InNamespace(req.Namespace), client.MatchingFields{podIndexKey: req.Name}); err != nil {
-		logger.Error(err, "error getting pods")
-		return ctrl.Result{}, err
+	if err = r.List(ctx, &pods, client.InNamespace(req.Namespace), client.MatchingFields{podIndexKey: req.Name}); err != nil {
+		logger.Info("error getting pods")
+		res = ctrl.Result{
+			Requeue:      true,
+			RequeueAfter: r.ErrRequeDelay,
+		}
+		return
 	}
-	logger.DebugL().Info("retrieved controlled pods")
+	logger.Debug("retrieved controlled pods")
 
-	// Retrieve or create the pod
-	var pod *v1.Pod
-	switch l := len(pods.Items); {
-	case test.DeletionTimestamp != nil && l > 0:
-		logger.TraceL().Info("deleting pods")
-		err := r.deleteTestPods(ctx, pods.Items)
-		if err == nil {
-			logger.Info("pods deleted")
-		} else {
-			logger.Error(err, "error deleting pod(s)")
-		}
-		return ctrl.Result{}, err
-	case l == 1:
-		pod = &pods.Items[0]
-	case l > 1:
-		logger.V(-1).Info("more than one pod owned by test", "count", l)
-		// Clean up and start over
-		if !test.Status.Phase.IsFinal() {
-			err := r.deleteTestPods(ctx, pods.Items)
-			if err != nil {
-				logger.Error(err, "error cleaning up extraneous pods")
+	// If deleted, clean up
+	if test.DeletionTimestamp != nil {
+		logger.Info("test is being deleted")
+		if l := len(pods.Items); l > 0 {
+			logger.Trace("deleting pods")
+			errs := ErrorList{}
+			for i := range pods.Items {
+				if _, e := cleanUp(ctx, r.Client, TestControllerFinalizer, &pods.Items[i]); e != nil {
+					errs.Append(e)
+				}
 			}
-			return ctrl.Result{}, err
+			if errs.HasError() {
+				logger.Info("one or more errors occurred while cleaning up managed pod(s)")
+				return ctrl.Result{
+					Requeue:      true,
+					RequeueAfter: r.ErrRequeDelay,
+				}, errs.Error()
+			}
+			logger.Info("pod deleted and finalizer removed")
 		}
-	case test.Status.Phase.IsFinal() || test.DeletionTimestamp != nil:
+		logger.Trace("removing finalizer")
+		if patched, err := removeFinalizer(ctx, r.Client, TestControllerFinalizer, &test); err != nil {
+			if err = client.IgnoreNotFound(err); err != nil {
+				logger.Info("error removing finalizer")
+			}
+		} else if patched {
+			logger.Info("finalizer removed")
+		}
+		return
+	}
+
+	// Ensure the finalizer is set
+	logger.Trace("ensuring finalizer is set")
+	if patched, e := addFinalizer(ctx, r.Client, TestControllerFinalizer, &test); e != nil {
+		if err = client.IgnoreNotFound(e); err != nil {
+			logger.Info("error setting finalizer")
+			return ctrl.Result{
+				Requeue:      true,
+				RequeueAfter: r.ErrRequeDelay,
+			}, err
+		}
+		logger.Debug("test no longer exists")
+		return
+	} else if patched {
+		logger.Debug("added finalizer")
+	}
+
+	// If Test status is empty, make Pending
+	if test.Status.Phase == "" {
+		logger.Trace("setting test as Pending")
 		orig := test.DeepCopy()
-		test.Finalizers = []string{}
-		for _, f := range orig.GetFinalizers() {
-			if f != TestControllerFinalizer {
-				test.Finalizers = append(test.Finalizers, f)
+		test.Status.Phase = konfirm.TestPending
+		if err = r.Client.Status().Patch(ctx, &test, client.MergeFrom(orig)); err != nil {
+			logger.Info("error setting test as Pending")
+			res = ctrl.Result{
+				Requeue:      true,
+				RequeueAfter: r.ErrRequeDelay,
 			}
+			return
 		}
-		logger.TraceL().Info("patching finalizer")
-		err := r.Client.Patch(ctx, &test, client.MergeFrom(orig))
-		if err == nil {
-			logger.DebugL().Info("finalizer removed")
-		} else {
-			logger.Error(err, "error removing Test finalizer")
-		}
-		return ctrl.Result{}, nil
-	default:
-		// Test needs Pod. If finalizer is set, create pods. Otherwise add finalizer
-		hasFinalizer := false
-		for _, f := range test.GetFinalizers() {
-			if f == TestControllerFinalizer {
-				hasFinalizer = true
-				break
-			}
-		}
-		if !hasFinalizer {
-			// Do not create pods until Test has konfirm finalizer
-			orig := test.DeepCopy()
-			test.Finalizers = append(test.Finalizers, TestControllerFinalizer)
-			err := r.Client.Patch(ctx, &test, client.MergeFrom(orig))
-			if err == nil {
-				logger.DebugL().Info("added test-controller finalizer")
+		logger.Debug("test set to Pending", "phase", test.Status.Phase)
+	}
+
+	// Handle the current phase
+	if test.Status.Phase.IsFinal() {
+		res, err = r.isComplete(ctx, &test, pods.Items)
+	} else {
+		res, err = r.isRunning(ctx, &test, pods.Items)
+	}
+
+	return
+}
+
+func (r *TestReconciler) isRunning(ctx context.Context, test *konfirm.Test, pods []v1.Pod) (res ctrl.Result, err error) {
+
+	logger := logging.FromContextWithName(ctx, "test-controller")
+
+	// Determine which pod will be used to determine the test results
+	var pod *v1.Pod
+	if l := len(pods); l > 0 {
+
+		// Remove unfinished, deleted pods from the list
+		var newPods []*v1.Pod
+		errs := ErrorList{}
+		for i := range pods {
+			p := &pods[i]
+			if p.DeletionTimestamp != nil {
+				logger.Trace("removing finalizer from pod", "pod", p.Name)
+				if patched, err := removeFinalizer(ctx, r.Client, TestControllerFinalizer, p); err != nil {
+					if err = client.IgnoreNotFound(err); err != nil {
+						logger.Info("error removing finalizer from pod", "pod", p.Name)
+						errs.Append(err)
+					}
+				} else if patched {
+					logger.Info("removed finalizer from deleted pod", "pod", p.Name)
+				}
+				// If the pod completed before being deleted, keep it in the list
+				if phase := p.Status.Phase; phase == v1.PodSucceeded || phase == v1.PodFailed {
+					newPods = append(newPods, p)
+				}
 			} else {
-				logger.Error(err, "error adding test-controller finalizer")
+				newPods = append(newPods, p)
 			}
-			return ctrl.Result{}, err
 		}
-		logger.TraceL().Info("creating pod")
-		if p, err := r.createTestPod(ctx, req, &test); err == nil {
-			logger.Info("pod created", "pod", client.ObjectKeyFromObject(p).String())
-			pod = p
-		} else {
-			logger.Error(err, "error creating pod")
-			r.Recorder.Event(&test, "Warning", TestErrorEvent, "error creating pod")
-			return ctrl.Result{}, err
+
+		// If an error occurred, return now
+		if errs.HasError() {
+			return ctrl.Result{
+				Requeue:      true,
+				RequeueAfter: r.ErrRequeDelay,
+			}, errs.Error()
+		}
+
+		// Reduce the list of controlled pods to no more than 1
+		if l := len(newPods); l > 0 {
+			pod = newPods[0]
+			errs = ErrorList{}
+			for i := 1; i < l; i++ {
+				if newPods[i].DeletionTimestamp == nil && pod.DeletionTimestamp != nil {
+					pod = newPods[i]
+				} else {
+					logger.Debug("removing extraneous pod", "pod", newPods[i].Name)
+					if _, err := cleanUp(ctx, r.Client, TestControllerFinalizer, newPods[i]); err != nil {
+						if err = client.IgnoreNotFound(err); err != nil {
+							logger.Info("error removing extraneous pod", "pod", newPods[i].Name)
+							errs.Append(err)
+						}
+					} else {
+						logger.Debug("removed extraneous pod", "pod", newPods[i].Name)
+					}
+				}
+			}
+			if errs.HasError() {
+				return ctrl.Result{
+					Requeue:      true,
+					RequeueAfter: r.ErrRequeDelay,
+				}, errs.Error()
+			}
 		}
 	}
 
-	// Update the test status as needed
-	orig := test.DeepCopy()
-	test.Status.Phase.FromPodPhase(pod.Status.Phase)
-	meta.SetStatusCondition(&test.Status.Conditions, metav1.Condition{
-		Type:               PodCreatedCondition,
-		Status:             "True",
-		ObservedGeneration: test.Generation,
-		Reason:             "PodCreated",
-		Message:            fmt.Sprintf("pod %s/%s was created", pod.Namespace, pod.Name),
-	})
-	if test.Status.Phase.IsFinal() {
+	// If a usable pod does not exist, create one
+	if pod == nil {
+		yes := true
+		pod = &v1.Pod{
+			ObjectMeta: test.Spec.Template.ObjectMeta,
+			Spec:       test.Spec.Template.Spec,
+		}
+		pod.ObjectMeta.Name = ""
+		pod.ObjectMeta.Namespace = test.Namespace
+		pod.ObjectMeta.GenerateName = test.Name + "-"
+		pod.ObjectMeta.OwnerReferences = []metav1.OwnerReference{
+			{
+				APIVersion:         test.APIVersion,
+				Kind:               test.Kind,
+				Name:               test.Name,
+				UID:                test.UID,
+				Controller:         &yes,
+				BlockOwnerDeletion: &yes,
+			},
+		}
+		pod.ObjectMeta.Finalizers = []string{TestControllerFinalizer}
+		pod.Spec.RestartPolicy = v1.RestartPolicyNever
+		if err = r.Create(ctx, pod); err != nil {
+			logger.Info("error creating pod")
+			r.Recorder.Event(test, "Warning", TestErrorEvent, "An error occurred while creating a test pod")
+			return ctrl.Result{
+				Requeue:      true,
+				RequeueAfter: r.ErrRequeDelay,
+			}, err
+		} else {
+			logger.Info("test is starting", "pod", pod.Name)
+		}
+	}
+
+	switch pod.Status.Phase {
+
+	case v1.PodPending:
+		if test.Status.Phase != konfirm.TestStarting {
+			logger.Trace("updating test status")
+			orig := test.DeepCopy()
+			test.Status.Phase = konfirm.TestStarting
+			meta.SetStatusCondition(&test.Status.Conditions, metav1.Condition{
+				Type:               PodCreatedCondition,
+				Status:             "True",
+				ObservedGeneration: test.Generation,
+				Reason:             "PodCreated",
+				Message:            fmt.Sprintf("Created pod %s", pod.Name),
+			})
+			meta.SetStatusCondition(&test.Status.Conditions, metav1.Condition{
+				Type:               TestCompletedCondition,
+				Status:             "False",
+				ObservedGeneration: test.Generation,
+				Reason:             "PodNotCompleted",
+				Message:            fmt.Sprintf("Pod %s is pending", pod.Name),
+			})
+			if err = r.Status().Patch(ctx, test, client.MergeFrom(orig)); err != nil {
+				logger.Info("error setting test as Starting")
+				res = ctrl.Result{
+					Requeue:      true,
+					RequeueAfter: r.ErrRequeDelay,
+				}
+			}
+			logger.Info("test is Starting")
+			r.Recorder.Eventf(test, "Normal", TestStartingEvent, "Created pod %s", pod.Name)
+		}
+
+	case v1.PodRunning:
+		if test.Status.Phase != konfirm.TestRunning {
+			logger.Trace("updating test status")
+			orig := test.DeepCopy()
+			test.Status.Phase = konfirm.TestRunning
+			meta.SetStatusCondition(&test.Status.Conditions, metav1.Condition{
+				Type:               PodCreatedCondition,
+				Status:             "True",
+				ObservedGeneration: test.Generation,
+				Reason:             "PodCreated",
+				Message:            fmt.Sprintf("Created pod %s", pod.Name),
+			})
+			meta.SetStatusCondition(&test.Status.Conditions, metav1.Condition{
+				Type:               TestCompletedCondition,
+				Status:             "False",
+				ObservedGeneration: test.Generation,
+				Reason:             "PodNotCompleted",
+				Message:            fmt.Sprintf("Pod %s is running", pod.Name),
+			})
+			if err = r.Status().Patch(ctx, test, client.MergeFrom(orig)); err != nil {
+				logger.Info("error setting test as Running")
+				res = ctrl.Result{
+					Requeue:      true,
+					RequeueAfter: r.ErrRequeDelay,
+				}
+			} else {
+				logger.Info("test is Running")
+			}
+		}
+
+	case v1.PodSucceeded:
+		orig := test.DeepCopy()
+		test.Status.Phase = konfirm.TestPassed
+		test.Status.Messages = make(map[string]string)
+		for i := range pod.Status.ContainerStatuses {
+			if state := pod.Status.ContainerStatuses[i].State.Terminated; state != nil {
+				test.Status.Messages[pod.Status.ContainerStatuses[i].Name] = state.Message
+			}
+		}
 		meta.SetStatusCondition(&test.Status.Conditions, metav1.Condition{
 			Type:               TestCompletedCondition,
 			Status:             "True",
 			ObservedGeneration: test.Generation,
-			Reason:             "PodCompleted",
-			Message:            fmt.Sprintf("pod %s/%s has completed", pod.Namespace, pod.Name),
+			Reason:             "PodSucceeded",
+			Message:            fmt.Sprintf("Pod %s completed successfully", pod.Name),
 		})
-		test.Status.Messages = make(map[string]string)
-		for _, status := range pod.Status.ContainerStatuses {
-			if state := status.State.Terminated; state != nil {
-				test.Status.Messages[status.Name] = state.Message
-			}
-		}
-	} else {
-		meta.SetStatusCondition(&test.Status.Conditions, metav1.Condition{
-			Type:               TestCompletedCondition,
-			Status:             "False",
-			ObservedGeneration: test.Generation,
-			Reason:             "PodNotCompleted",
-			Message:            fmt.Sprintf("pod %s/%s has not completed", pod.Namespace, pod.Name),
-		})
-	}
-
-	logger.TraceL().Info("patching status")
-	err := r.Client.Status().Patch(ctx, &test, client.MergeFrom(orig))
-	if err == nil {
-		logger.Info("status patched", "phase", test.Status.Phase)
-	} else {
-		logger.Error(err, "error patching status")
-	}
-
-	// Record the appropriate event
-	if orig.Status.Phase != test.Status.Phase {
-		switch test.Status.Phase {
-		case konfirmv1alpha1.TestStarting:
-			r.Recorder.Eventf(&test, "Normal", TestStartingEvent, "pod %s/%s is pending", pod.Namespace, pod.Name)
-		case konfirmv1alpha1.TestRunning:
-			r.Recorder.Eventf(&test, "Normal", TestRunningEvent, "pod %s/%s is running", pod.Namespace, pod.Name)
-		case konfirmv1alpha1.TestPassed:
-			r.Recorder.Eventf(&test, "Normal", TestPassedEvent, "pod %s/%s succeeded", pod.Namespace, pod.Name)
-		case konfirmv1alpha1.TestFailed:
-			r.Recorder.Eventf(&test, "Warning", TestFailedEvent, "pod %s/%s failed", pod.Namespace, pod.Name)
-		}
-	}
-
-	// Handle retention by policy
-	if test.Status.Phase.IsFinal() {
-		switch test.Spec.RetentionPolicy {
-		case konfirmv1alpha1.RetainOnFailure:
-			if test.Status.Phase == konfirmv1alpha1.TestFailed {
-				logger.Info("retaining test pods due to RetainOnFailure")
-				break
-			}
-			fallthrough
-		case konfirmv1alpha1.RetainNever:
-			if err := r.deleteTestPods(ctx, pods.Items); err == nil {
-				logger.Info("pods removed based on retention policy")
-			} else {
-				logger.Error(err, "error cleaning up pods after test completion")
-			}
-		case konfirmv1alpha1.RetainAlways:
-			logger.Info("retaining test pods due to RetainAlways")
-		}
-	}
-
-	// FIXME requeue all erred runs
-	return ctrl.Result{}, err
-}
-
-func (r *TestReconciler) createTestPod(ctx context.Context, req ctrl.Request, test *konfirmv1alpha1.Test) (*v1.Pod, error) {
-	yes := true
-	pod := v1.Pod{
-		ObjectMeta: test.Spec.Template.ObjectMeta,
-		Spec:       test.Spec.Template.Spec,
-	}
-	pod.ObjectMeta.Name = ""
-	pod.ObjectMeta.Namespace = req.Namespace
-	pod.ObjectMeta.GenerateName = test.Name + "-"
-	pod.ObjectMeta.OwnerReferences = []metav1.OwnerReference{
-		{
-			APIVersion:         test.APIVersion,
-			Kind:               test.Kind,
-			Name:               test.Name,
-			UID:                test.UID,
-			Controller:         &yes,
-			BlockOwnerDeletion: &yes,
-		},
-	}
-	pod.ObjectMeta.Finalizers = []string{TestControllerFinalizer}
-	pod.Spec.RestartPolicy = v1.RestartPolicyNever
-	return &pod, r.Create(ctx, &pod)
-}
-
-func (r *TestReconciler) deleteTestPods(ctx context.Context, pods []v1.Pod) error {
-	errs := ErrorList{}
-	for _, pod := range pods {
-
-		// Patch the pod to remove the konfirm finalizer, preserving any additional finalizers
-		orig := pod.DeepCopy()
-		pod.ObjectMeta.Finalizers = []string{}
-		for _, f := range orig.Finalizers {
-			if f != TestControllerFinalizer {
-				pod.ObjectMeta.Finalizers = append(pod.ObjectMeta.Finalizers, f)
-			}
-		}
-		if err := r.Patch(ctx, &pod, client.MergeFrom(orig)); err == nil {
-			// Delete the pod
-			if pod.DeletionTimestamp == nil {
-				if err := r.Delete(ctx, &pod); err != nil {
-					errs.Append(err)
-				}
+		if err = r.Client.Status().Patch(ctx, test, client.MergeFrom(orig)); err != nil {
+			logger.Info("error setting test as Passed")
+			res = ctrl.Result{
+				Requeue:      true,
+				RequeueAfter: r.ErrRequeDelay,
 			}
 		} else {
-			errs.Append(err)
+			logger.Info("test Passed")
+			r.Recorder.Eventf(test, "Normal", TestPassedEvent, "Pod %s succeeded", pod.Name)
+		}
+
+	case v1.PodFailed:
+		orig := test.DeepCopy()
+		test.Status.Phase = konfirm.TestFailed
+		test.Status.Messages = make(map[string]string)
+		for i := range pod.Status.ContainerStatuses {
+			if state := pod.Status.ContainerStatuses[i].State.Terminated; state != nil {
+				test.Status.Messages[pod.Status.ContainerStatuses[i].Name] = state.Message
+			}
+		}
+		meta.SetStatusCondition(&test.Status.Conditions, metav1.Condition{
+			Type:               TestCompletedCondition,
+			Status:             "True",
+			ObservedGeneration: test.Generation,
+			Reason:             "PodFailed",
+			Message:            fmt.Sprintf("Pod %s failed", pod.Name),
+		})
+		if err = r.Client.Status().Patch(ctx, test, client.MergeFrom(orig)); err != nil {
+			logger.Info("error setting test as Failed")
+			res = ctrl.Result{
+				Requeue:      true,
+				RequeueAfter: r.ErrRequeDelay,
+			}
+		} else {
+			logger.Info("test Failed")
+			r.Recorder.Eventf(test, "Normal", TestFailedEvent, "Pod %s failed", pod.Name)
 		}
 	}
-	return errs.Error()
+
+	return
+}
+
+func (r *TestReconciler) isComplete(ctx context.Context, test *konfirm.Test, pods []v1.Pod) (res ctrl.Result, err error) {
+
+	logger := logging.FromContextWithName(ctx, "test-controller")
+
+	// Remove finalizers from deleted pods
+	errs := ErrorList{}
+	for i := range pods {
+		pod := &pods[i]
+		if pod.DeletionTimestamp != nil {
+			logger.Trace("removing finalizer from pod", "pod", pod.Name)
+			if patched, err := removeFinalizer(ctx, r.Client, TestControllerFinalizer, pod); err != nil {
+				if err = client.IgnoreNotFound(err); err != nil {
+					logger.Info("error removing finalizer from pod", "pod", pod.Name)
+					errs.Append(err)
+				}
+			} else if patched {
+				logger.Info("removed finalizer from deleted pod", "pod", pod.Name)
+			}
+		}
+	}
+	if errs.HasError() {
+		return ctrl.Result{
+			Requeue:      true,
+			RequeueAfter: r.ErrRequeDelay,
+		}, errs.Error()
+	}
+
+	// Apply retention policy
+	if policy := test.Spec.RetentionPolicy; policy == konfirm.RetainNever ||
+		(policy == konfirm.RetainOnFailure && test.Status.Phase == konfirm.TestPassed) {
+		if l := len(pods); l > 0 {
+			logger.Trace("applying retention policy")
+			errs = ErrorList{}
+			for i := range pods {
+				if _, e := cleanUp(ctx, r.Client, TestControllerFinalizer, &pods[i]); e != nil {
+					errs.Append(e)
+				}
+			}
+			if errs.HasError() {
+				logger.Info("one or more errors occurred while cleaning up managed pod(s)")
+				return ctrl.Result{
+					Requeue:      true,
+					RequeueAfter: r.ErrRequeDelay,
+				}, errs.Error()
+			}
+			logger.Info("pod removed according to retention policy")
+		}
+	}
+
+	return
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -320,7 +456,7 @@ func (r *TestReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			return nil
 		}
 		// Return the owner if it's a test
-		if owner.APIVersion == konfirmv1alpha1.GroupVersion.String() && owner.Kind == "Test" {
+		if owner.APIVersion == konfirm.GroupVersion.String() && owner.Kind == "Test" {
 			return []string{owner.Name}
 		} else {
 			return nil
@@ -330,7 +466,7 @@ func (r *TestReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}
 
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&konfirmv1alpha1.Test{}).
+		For(&konfirm.Test{}).
 		Owns(&v1.Pod{}).
 		Complete(r)
 }

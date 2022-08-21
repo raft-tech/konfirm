@@ -226,7 +226,7 @@ var _ = Describe("On Test Controller reconciliation", func() {
 					Expect(test.Status.Conditions).To(ContainElement(And(
 						HaveField("Type", controllers.TestCompletedCondition),
 						HaveField("Status", metav1.ConditionTrue),
-						HaveField("Reason", "PodCompleted"),
+						HaveField("Reason", "PodSucceeded"),
 					)), "have the expected TestCompleted condition")
 				})
 
@@ -325,7 +325,7 @@ var _ = Describe("On Test Controller reconciliation", func() {
 					Expect(test.Status.Conditions).To(ContainElement(And(
 						HaveField("Type", controllers.TestCompletedCondition),
 						HaveField("Status", metav1.ConditionTrue),
-						HaveField("Reason", "PodCompleted"),
+						HaveField("Reason", "PodFailed"),
 					)), "have the expected TestCompleted condition")
 				})
 

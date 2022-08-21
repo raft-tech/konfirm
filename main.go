@@ -86,9 +86,10 @@ func main() {
 
 	recorder := mgr.GetEventRecorderFor("konfirm")
 	if err = (&controllers.TestReconciler{
-		Client:   mgr.GetClient(),
-		Scheme:   mgr.GetScheme(),
-		Recorder: recorder,
+		Client:        mgr.GetClient(),
+		Scheme:        mgr.GetScheme(),
+		Recorder:      recorder,
+		ErrRequeDelay: time.Minute,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Test")
 		os.Exit(1)

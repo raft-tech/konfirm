@@ -24,15 +24,8 @@ import (
 	"strconv"
 )
 
-const (
-	INFO = iota + 1
-	DEBUG
-	TRACE
-)
-
 type Logger struct {
 	logr.Logger
-	warn  logr.Logger
 	debug logr.Logger
 	trace logr.Logger
 }
@@ -40,30 +33,17 @@ type Logger struct {
 func NewLogger(from logr.Logger) *Logger {
 	return &Logger{
 		Logger: from,
-		warn:   from,
 		debug:  from.V(1),
 		trace:  from.V(2),
 	}
-}
-
-func (l *Logger) Warn(msg string, keysAndValues ...interface{}) {
-	l.warn.Info(msg, keysAndValues...)
 }
 
 func (l *Logger) Debug(msg string, keysAndValues ...interface{}) {
 	l.debug.Info(msg, keysAndValues...)
 }
 
-func (l *Logger) DebugL() logr.Logger {
-	return l.debug
-}
-
 func (l *Logger) Trace(msg string, keysAndValues ...interface{}) {
 	l.trace.Info(msg, keysAndValues...)
-}
-
-func (l *Logger) TraceL() logr.Logger {
-	return l.trace
 }
 
 func (l *Logger) WithValues(keysAndValues ...interface{}) *Logger {
