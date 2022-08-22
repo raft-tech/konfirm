@@ -249,6 +249,29 @@ var _ = Describe("On Test Controller reconciliation", func() {
 							return apierrors.IsNotFound(err)
 						}, timeout).Should(BeFalse())
 					})
+
+					When("the pod is manually deleted", func() {
+
+						JustBeforeEach(func() {
+
+							// Allow the test to complete
+							Eventually(func() (phase konfirm.TestPhase, err error) {
+								if err = k8sClient.Get(ctx, client.ObjectKeyFromObject(test), test); err == nil {
+									phase = test.Status.Phase
+								}
+								return
+							}, timeout).Should(Equal(konfirm.TestPassed))
+
+							// Delete the pod (i.e., manual deletion, eviction, etc.)
+							Expect(k8sClient.Delete(ctx, pod)).NotTo(HaveOccurred())
+						})
+
+						It("it removes the finalizer", func() {
+							Eventually(func() error {
+								return k8sClient.Get(ctx, client.ObjectKeyFromObject(pod), pod)
+							}, timeout).Should(Satisfy(apierrors.IsNotFound))
+						})
+					})
 				})
 
 				When("the retention policy is Never", func() {
@@ -336,6 +359,29 @@ var _ = Describe("On Test Controller reconciliation", func() {
 					}, timeout).Should(BeFalse())
 				})
 
+				When("the pod is manually deleted", func() {
+
+					JustBeforeEach(func() {
+
+						// Allow the test to complete
+						Eventually(func() (phase konfirm.TestPhase, err error) {
+							if err = k8sClient.Get(ctx, client.ObjectKeyFromObject(test), test); err == nil {
+								phase = test.Status.Phase
+							}
+							return
+						}, timeout).Should(Equal(konfirm.TestFailed))
+
+						// Delete the pod (i.e., manual deletion, eviction, etc.)
+						Expect(k8sClient.Delete(ctx, pod)).NotTo(HaveOccurred())
+					})
+
+					It("it removes the finalizer", func() {
+						Eventually(func() error {
+							return k8sClient.Get(ctx, client.ObjectKeyFromObject(pod), pod)
+						}, timeout).Should(Satisfy(apierrors.IsNotFound))
+					})
+				})
+
 				When("the retention policy is Always", func() {
 
 					BeforeEach(func() {
@@ -347,6 +393,29 @@ var _ = Describe("On Test Controller reconciliation", func() {
 							err := k8sClient.Get(ctx, client.ObjectKeyFromObject(pod), &v1.Pod{})
 							return apierrors.IsNotFound(err)
 						}, timeout).Should(BeFalse())
+					})
+
+					When("the pod is manually deleted", func() {
+
+						JustBeforeEach(func() {
+
+							// Allow the test to complete
+							Eventually(func() (phase konfirm.TestPhase, err error) {
+								if err = k8sClient.Get(ctx, client.ObjectKeyFromObject(test), test); err == nil {
+									phase = test.Status.Phase
+								}
+								return
+							}, timeout).Should(Equal(konfirm.TestFailed))
+
+							// Delete the pod (i.e., manual deletion, eviction, etc.)
+							Expect(k8sClient.Delete(ctx, pod)).NotTo(HaveOccurred())
+						})
+
+						It("it removes the finalizer", func() {
+							Eventually(func() error {
+								return k8sClient.Get(ctx, client.ObjectKeyFromObject(pod), pod)
+							}, timeout).Should(Satisfy(apierrors.IsNotFound))
+						})
 					})
 				})
 
@@ -376,6 +445,109 @@ var _ = Describe("On Test Controller reconciliation", func() {
 							return apierrors.IsNotFound(err)
 						}, timeout).Should(BeFalse())
 					})
+				})
+			})
+
+			When("a pod is evicted after completing", func() {
+
+				JustBeforeEach(func() {
+
+					origPod := pod
+
+					// Create the pod, but do not associate it with the Test yet
+					pod = &v1.Pod{
+						ObjectMeta: test.Spec.Template.ObjectMeta,
+						Spec:       test.Spec.Template.Spec,
+					}
+					pod.ObjectMeta.Name = ""
+					pod.ObjectMeta.Namespace = test.Namespace
+					pod.ObjectMeta.GenerateName = test.Name + "-"
+					pod.ObjectMeta.Finalizers = []string{
+						controllers.TestControllerFinalizer,
+						konfirm.GroupName + "/testing",
+					}
+					pod.Spec.RestartPolicy = v1.RestartPolicyNever
+					Expect(k8sClient.Create(ctx, pod)).NotTo(HaveOccurred())
+
+					// Progress the pod to Success and delete it
+					pod.Status.Phase = v1.PodSucceeded
+					Eventually(func() (err error) {
+						if err = k8sClient.Get(ctx, client.ObjectKeyFromObject(pod), pod); err == nil {
+							pod.Status.Phase = v1.PodSucceeded
+							err = k8sClient.Status().Update(ctx, pod)
+						}
+						return
+					}, timeout).ShouldNot(HaveOccurred())
+					Eventually(func() (err error) {
+						if err = k8sClient.Get(ctx, client.ObjectKeyFromObject(pod), pod); err == nil {
+							err = k8sClient.Delete(ctx, pod)
+						}
+						return
+					}, timeout).ShouldNot(HaveOccurred())
+
+					// Associate the pod with the test
+					Eventually(func() (err error) {
+						if err = k8sClient.Get(ctx, client.ObjectKeyFromObject(pod), pod); err == nil {
+							yes := true
+							pod.ObjectMeta.OwnerReferences = []metav1.OwnerReference{
+								{
+									APIVersion:         konfirm.GroupVersion.String(),
+									Kind:               "Test",
+									Name:               test.Name,
+									UID:                test.UID,
+									Controller:         &yes,
+									BlockOwnerDeletion: &yes,
+								},
+							}
+							err = k8sClient.Update(ctx, pod)
+						}
+						return
+					}, timeout).ShouldNot(HaveOccurred())
+
+					// Delete the original Pod
+					Expect(k8sClient.Delete(ctx, origPod)).NotTo(HaveOccurred())
+				})
+
+				JustAfterEach(func() {
+					Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(pod), pod)).NotTo(HaveOccurred())
+					pod.Finalizers = []string{}
+					Expect(k8sClient.Update(ctx, pod)).NotTo(HaveOccurred())
+				})
+
+				It("the test should pass", func() {
+					Eventually(func() (phase konfirm.TestPhase, err error) {
+						if err = k8sClient.Get(ctx, client.ObjectKeyFromObject(test), test); err == nil {
+							phase = test.Status.Phase
+						}
+						return
+					}, timeout).Should(Equal(konfirm.TestPassed))
+				})
+			})
+
+			When("when the pod is evicted", func() {
+
+				JustBeforeEach(func() {
+
+					// Ensure the finalizer is set
+					Eventually(func() (*v1.Pod, error) {
+						err := k8sClient.Get(ctx, client.ObjectKeyFromObject(pod), pod)
+						return pod, err
+					}, timeout).Should(HaveField("Finalizers", ContainElement(controllers.TestControllerFinalizer)))
+
+					// Delete the pod
+					Expect(k8sClient.Delete(ctx, pod)).NotTo(HaveOccurred())
+				})
+
+				It("it removes the finalizer", func() {
+					Eventually(func() error {
+						return k8sClient.Get(ctx, client.ObjectKeyFromObject(pod), pod)
+					}, timeout).Should(Satisfy(apierrors.IsNotFound))
+				})
+
+				It("creates a new pod", func() {
+					Eventually(func() ([]v1.Pod, error) {
+						return getPods(ctx, test)
+					}).Should(ContainElement(HaveField("UID", Not(Equal(pod.UID)))))
 				})
 			})
 

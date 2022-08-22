@@ -62,8 +62,6 @@ type TestReconciler struct {
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.11.2/pkg/reconcile
 func (r *TestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ctrl.Result, err error) {
 
-	// TODO Add finalizer to Test to ensure pod is deleted when test is deleted
-
 	logger := logging.FromContextWithName(ctx, "test-controller")
 	logger.Debug("starting test reconciliation")
 
