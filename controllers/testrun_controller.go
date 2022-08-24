@@ -147,6 +147,51 @@ func (r *TestRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, nil
 	}
 
+	// Handle deleted tests
+	{
+		// The basic strategy here is to iterate over tests from beginning to end looking for
+		// deleted tests. If a deleted test is encountered, the finalizer is removed. We then look
+		// from end to beginning for a not-deleted test, removing finalizers, from deleted tests as
+		// we go, moving the highest index not-deleted test run into the highest deleted index.
+		removeFinalizer := func(test *konfirm.Test) (err error) {
+			logger.Trace("removing finalizer from deleted test", "test", test.Name)
+			if _, err = removeFinalizer(ctx, r.Client, TestRunControllerFinalizer, test); err == nil {
+				logger.Debug("removed finalizer from deleted test", "test", test.Name)
+			} else {
+				logger.Info("error removing finalizer from deleted test", "test", test.Name)
+			}
+			return
+		}
+		for i, j := 0, len(tests.Items); i < j; i++ {
+			if tests.Items[i].DeletionTimestamp != nil {
+				// Remove the finalizer from Items[i]
+				if err := removeFinalizer(&tests.Items[i]); err != nil {
+					return ctrl.Result{
+						Requeue:      true,
+						RequeueAfter: r.ErrRequeueDelay,
+					}, err
+				}
+				// Now attempt to replace Items[i] from the end of the slice
+				for j--; i < j; j-- {
+					if tests.Items[j].DeletionTimestamp == nil {
+						// Success, move this test to Items[i] and continue iterating up
+						tests.Items[i] = tests.Items[j]
+						break
+					} else {
+						// This test is also deleted, remove the finalizer and continue iterating down
+						if err := removeFinalizer(&tests.Items[i]); err != nil {
+							return ctrl.Result{
+								Requeue:      true,
+								RequeueAfter: r.ErrRequeueDelay,
+							}, err
+						}
+					}
+				}
+				tests.Items = tests.Items[:j]
+			}
+		}
+	}
+
 	// Phase-specific logic
 	if phase := testRun.Status.Phase; phase.IsFinal() {
 		return r.isComplete(ctx, &testRun, &tests)

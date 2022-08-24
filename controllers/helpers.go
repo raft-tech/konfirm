@@ -18,7 +18,12 @@ package controllers
 
 import (
 	"context"
+	"fmt"
+	"github.com/davecgh/go-spew/spew"
+	konfirm "github.com/raft-tech/konfirm/api/v1alpha1"
+	"hash/fnv"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/rand"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -120,4 +125,17 @@ func cleanUpAll(ctx context.Context, kClient client.Client, finalizer string, ob
 		}
 	}
 	return modified, errs.Error()
+}
+
+func computeTestRunHash(testRun *konfirm.TestRunSpec) string {
+	hasher := fnv.New32a()
+	printer := spew.ConfigState{
+		DisableMethods: true,
+		Indent:         " ",
+		SpewKeys:       true,
+		SortKeys:       true,
+	}
+	_, _ = printer.Fprintf(hasher, "%#v", testRun)
+	digest := fmt.Sprint(hasher.Sum32())
+	return rand.SafeEncodeString(digest)
 }

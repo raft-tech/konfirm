@@ -86,20 +86,12 @@ func main() {
 
 	recorder := mgr.GetEventRecorderFor("konfirm")
 	if err = (&controllers.TestReconciler{
-		Client:        mgr.GetClient(),
-		Scheme:        mgr.GetScheme(),
-		Recorder:      recorder,
-		ErrRequeDelay: time.Minute,
+		Client:          mgr.GetClient(),
+		Scheme:          mgr.GetScheme(),
+		Recorder:        recorder,
+		ErrRequeueDelay: time.Minute,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Test")
-		os.Exit(1)
-	}
-	if err = (&controllers.TestSuiteReconciler{
-		Client:   mgr.GetClient(),
-		Scheme:   mgr.GetScheme(),
-		Recorder: recorder,
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "TestSuite")
 		os.Exit(1)
 	}
 	if err = (&controllers.TestRunReconciler{
@@ -109,6 +101,15 @@ func main() {
 		ErrRequeueDelay: time.Minute,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "TestRun")
+		os.Exit(1)
+	}
+	if err = (&controllers.TestSuiteReconciler{
+		Client:          mgr.GetClient(),
+		Scheme:          mgr.GetScheme(),
+		Recorder:        recorder,
+		ErrRequeueDelay: time.Minute,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "TestSuite")
 		os.Exit(1)
 	}
 	//+kubebuilder:scaffold:builder

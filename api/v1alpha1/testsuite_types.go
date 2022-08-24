@@ -81,13 +81,15 @@ type TestSuiteSetUp struct {
 // TestSuiteSpec defines the desired state of TestSuite
 type TestSuiteSpec struct {
 
-	// +kubebuilder:default=OnFailure
-	RetentionPolicy RetainPolicy `json:"retentionPolicy,omitempty"`
+	// +kubebuilder:default=3
+	// +kubebuilder:validation:Maximum=255
+	// +kubebuilder:validation:Minimum=0
+	HistoryLimit uint8 `json:"historyLimit,omitempty"`
 
 	SetUp TestSuiteSetUp `json:"setUp,omitempty"`
 
-	// +kubebuilder:validation:MinItems=1
-	Tests []TestTemplate `json:"tests"`
+	// +kubebuilder:validation:Required
+	Template TestRunSpec `json:"template"`
 
 	When TestSuiteTriggers `json:"when,omitempty"`
 }
@@ -109,12 +111,14 @@ type TestSuiteStatus struct {
 	// +kubebuilder:default=Pending
 	// Phase (Pending, Ready, Running, Error)
 	Phase TestSuitePhase `json:"phase,omitempty"`
+
+	CurrentTestRun string `json:"currentTestRun,omitempty"`
 }
 
+// TestSuite is the Schema for the testsuites API
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:trigger
 //+kubebuilder:subresource:status
-// TestSuite is the Schema for the testsuites API
 type TestSuite struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -123,8 +127,8 @@ type TestSuite struct {
 	Status            TestSuiteStatus  `json:"status,omitempty"`
 }
 
-//+kubebuilder:object:root=true
 // TestSuiteList contains a list of TestSuite
+//+kubebuilder:object:root=true
 type TestSuiteList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`

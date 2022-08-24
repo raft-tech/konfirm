@@ -363,13 +363,7 @@ func (in *TestSuiteSetUp) DeepCopy() *TestSuiteSetUp {
 func (in *TestSuiteSpec) DeepCopyInto(out *TestSuiteSpec) {
 	*out = *in
 	out.SetUp = in.SetUp
-	if in.Tests != nil {
-		in, out := &in.Tests, &out.Tests
-		*out = make([]TestTemplate, len(*in))
-		for i := range *in {
-			(*in)[i].DeepCopyInto(&(*out)[i])
-		}
-	}
+	in.Template.DeepCopyInto(&out.Template)
 	out.When = in.When
 }
 

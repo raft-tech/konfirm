@@ -45,9 +45,9 @@ const (
 // TestReconciler reconciles a Test object
 type TestReconciler struct {
 	client.Client
-	Scheme        *runtime.Scheme
-	Recorder      record.EventRecorder
-	ErrRequeDelay time.Duration
+	Scheme          *runtime.Scheme
+	Recorder        record.EventRecorder
+	ErrRequeueDelay time.Duration
 }
 
 //+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=tests,verbs=get;list;watch
@@ -73,7 +73,7 @@ func (r *TestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (res c
 			logger.Info("error getting test")
 			res = ctrl.Result{
 				Requeue:      true,
-				RequeueAfter: r.ErrRequeDelay,
+				RequeueAfter: r.ErrRequeueDelay,
 			}
 			return
 		}
@@ -89,7 +89,7 @@ func (r *TestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (res c
 		logger.Info("error getting pods")
 		res = ctrl.Result{
 			Requeue:      true,
-			RequeueAfter: r.ErrRequeDelay,
+			RequeueAfter: r.ErrRequeueDelay,
 		}
 		return
 	}
@@ -110,7 +110,7 @@ func (r *TestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (res c
 				logger.Info("one or more errors occurred while cleaning up managed pod(s)")
 				return ctrl.Result{
 					Requeue:      true,
-					RequeueAfter: r.ErrRequeDelay,
+					RequeueAfter: r.ErrRequeueDelay,
 				}, errs.Error()
 			}
 			logger.Info("pod deleted and finalizer removed")
@@ -133,7 +133,7 @@ func (r *TestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (res c
 			logger.Info("error setting finalizer")
 			return ctrl.Result{
 				Requeue:      true,
-				RequeueAfter: r.ErrRequeDelay,
+				RequeueAfter: r.ErrRequeueDelay,
 			}, err
 		}
 		logger.Debug("test no longer exists")
@@ -151,7 +151,7 @@ func (r *TestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (res c
 			logger.Info("error setting test as Pending")
 			res = ctrl.Result{
 				Requeue:      true,
-				RequeueAfter: r.ErrRequeDelay,
+				RequeueAfter: r.ErrRequeueDelay,
 			}
 			return
 		}
@@ -204,7 +204,7 @@ func (r *TestReconciler) isRunning(ctx context.Context, test *konfirm.Test, pods
 		if errs.HasError() {
 			return ctrl.Result{
 				Requeue:      true,
-				RequeueAfter: r.ErrRequeDelay,
+				RequeueAfter: r.ErrRequeueDelay,
 			}, errs.Error()
 		}
 
@@ -230,7 +230,7 @@ func (r *TestReconciler) isRunning(ctx context.Context, test *konfirm.Test, pods
 			if errs.HasError() {
 				return ctrl.Result{
 					Requeue:      true,
-					RequeueAfter: r.ErrRequeDelay,
+					RequeueAfter: r.ErrRequeueDelay,
 				}, errs.Error()
 			}
 		}
@@ -263,7 +263,7 @@ func (r *TestReconciler) isRunning(ctx context.Context, test *konfirm.Test, pods
 			r.Recorder.Event(test, "Warning", TestErrorEvent, "An error occurred while creating a test pod")
 			return ctrl.Result{
 				Requeue:      true,
-				RequeueAfter: r.ErrRequeDelay,
+				RequeueAfter: r.ErrRequeueDelay,
 			}, err
 		} else {
 			logger.Info("test is starting", "pod", pod.Name)
@@ -295,7 +295,7 @@ func (r *TestReconciler) isRunning(ctx context.Context, test *konfirm.Test, pods
 				logger.Info("error setting test as Starting")
 				res = ctrl.Result{
 					Requeue:      true,
-					RequeueAfter: r.ErrRequeDelay,
+					RequeueAfter: r.ErrRequeueDelay,
 				}
 			}
 			logger.Info("test is Starting")
@@ -325,7 +325,7 @@ func (r *TestReconciler) isRunning(ctx context.Context, test *konfirm.Test, pods
 				logger.Info("error setting test as Running")
 				res = ctrl.Result{
 					Requeue:      true,
-					RequeueAfter: r.ErrRequeDelay,
+					RequeueAfter: r.ErrRequeueDelay,
 				}
 			} else {
 				logger.Info("test is Running")
@@ -352,7 +352,7 @@ func (r *TestReconciler) isRunning(ctx context.Context, test *konfirm.Test, pods
 			logger.Info("error setting test as Passed")
 			res = ctrl.Result{
 				Requeue:      true,
-				RequeueAfter: r.ErrRequeDelay,
+				RequeueAfter: r.ErrRequeueDelay,
 			}
 		} else {
 			logger.Info("test Passed")
@@ -379,7 +379,7 @@ func (r *TestReconciler) isRunning(ctx context.Context, test *konfirm.Test, pods
 			logger.Info("error setting test as Failed")
 			res = ctrl.Result{
 				Requeue:      true,
-				RequeueAfter: r.ErrRequeDelay,
+				RequeueAfter: r.ErrRequeueDelay,
 			}
 		} else {
 			logger.Info("test Failed")
@@ -413,7 +413,7 @@ func (r *TestReconciler) isComplete(ctx context.Context, test *konfirm.Test, pod
 	if errs.HasError() {
 		return ctrl.Result{
 			Requeue:      true,
-			RequeueAfter: r.ErrRequeDelay,
+			RequeueAfter: r.ErrRequeueDelay,
 		}, errs.Error()
 	}
 
@@ -432,7 +432,7 @@ func (r *TestReconciler) isComplete(ctx context.Context, test *konfirm.Test, pod
 				logger.Info("one or more errors occurred while cleaning up managed pod(s)")
 				return ctrl.Result{
 					Requeue:      true,
-					RequeueAfter: r.ErrRequeDelay,
+					RequeueAfter: r.ErrRequeueDelay,
 				}, errs.Error()
 			}
 			logger.Info("pod removed according to retention policy")
