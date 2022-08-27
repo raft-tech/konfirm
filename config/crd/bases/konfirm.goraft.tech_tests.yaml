@@ -12,6 +12,8 @@ spec:
     kind: Test
     listKind: TestList
     plural: tests
+    shortNames:
+    - t
     singular: test
   scope: Namespaced
   versions:

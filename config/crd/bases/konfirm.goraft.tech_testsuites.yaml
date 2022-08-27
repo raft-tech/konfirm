@@ -12,6 +12,8 @@ spec:
     kind: TestSuite
     listKind: TestSuiteList
     plural: testsuites
+    shortNames:
+    - ts
     singular: testsuite
   scope: Namespaced
   versions:

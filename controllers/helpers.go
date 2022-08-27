@@ -27,6 +27,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+const (
+	metricNamespace = "konfirm"
+)
+
 // getCondition returns the specified condition if it exists in the provided slice.
 func getCondition(condition string, from []metav1.Condition) (*metav1.Condition, bool) {
 	for _, c := range from {

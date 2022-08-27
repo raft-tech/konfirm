@@ -117,6 +117,7 @@ type TestSuiteStatus struct {
 
 // TestSuite is the Schema for the testsuites API
 //+kubebuilder:object:root=true
+//+kubebuilder:resource:shortName=ts
 //+kubebuilder:subresource:trigger
 //+kubebuilder:subresource:status
 type TestSuite struct {

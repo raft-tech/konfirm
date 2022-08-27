@@ -1,35 +1,36 @@
 apiVersion: konfirm.goraft.tech/v1alpha1
-kind: TestRun
+kind: TestSuite
 metadata:
   name: sample
 spec:
-  tests:
-    - description: Generals gathered in their masses
-      template:
-        spec:
-          containers:
-            - name: test
-              image: konfirm/mock:v0.1.0
-    - description: Just like witches at black masses
-      template:
-        spec:
-          containers:
-            - name: test
-              image: konfirm/mock:v0.1.0
-    - description: Evil minds that plot destruction
-      template:
-        spec:
-          containers:
-            - name: test
-              image: konfirm/mock:v0.1.0
-              args:
-                - "--fail"
-    - description: Sorcerer of death's construction
-      template:
-        spec:
-          containers:
-            - name: test
-              image: konfirm/mock:v0.1.0
-              args:
-                - "--fail"
-                - "by Black Sabbath"
+    template:
+      tests:
+      - description: Generals gathered in their masses
+        template:
+          spec:
+            containers:
+              - name: test
+                image: konfirm/mock:v0.1.0
+      - description: Just like witches at black masses
+        template:
+          spec:
+            containers:
+              - name: test
+                image: konfirm/mock:v0.1.0
+      - description: Evil minds that plot destruction
+        template:
+          spec:
+            containers:
+              - name: test
+                image: konfirm/mock:v0.1.0
+                args:
+                  - "--fail"
+      - description: Sorcerer of death's construction
+        template:
+          spec:
+            containers:
+              - name: test
+                image: konfirm/mock:v0.1.0
+                args:
+                  - "--fail"
+                  - "by Black Sabbath"

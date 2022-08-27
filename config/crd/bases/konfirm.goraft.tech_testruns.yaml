@@ -12,6 +12,8 @@ spec:
     kind: TestRun
     listKind: TestRunList
     plural: testruns
+    shortNames:
+    - tr
     singular: testrun
   scope: Namespaced
   versions:

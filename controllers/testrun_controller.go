@@ -49,10 +49,10 @@ type TestRunReconciler struct {
 	ErrRequeueDelay time.Duration
 }
 
-//+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=testruns,verbs=get;list;watch
+//+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=testruns,verbs=get;list;watch;patch
 //+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=testruns/status,verbs=get;patch
-//+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=testruns/finalizers,verbs=update;patch
 //+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=tests,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.

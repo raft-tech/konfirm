@@ -19,6 +19,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"github.com/prometheus/client_golang/prometheus"
 	konfirm "github.com/raft-tech/konfirm/api/v1alpha1"
 	"github.com/raft-tech/konfirm/logging"
 	v1 "k8s.io/api/core/v1"
@@ -28,6 +29,7 @@ import (
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/metrics"
 	"time"
 )
 
@@ -42,6 +44,25 @@ const (
 	TestControllerFinalizer = konfirm.GroupName + "/test-controller"
 )
 
+var (
+	passed = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: metricNamespace,
+		Subsystem: "tests",
+		Name:      "passed",
+		Help:      "The number of Tests that have passed",
+	}, []string{"test_namespace"})
+	failed = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: metricNamespace,
+		Subsystem: "tests",
+		Name:      "failed",
+		Help:      "The number of Tests that have failed",
+	}, []string{"test_namespace"})
+)
+
+func init() {
+	metrics.Registry.MustRegister(passed, failed)
+}
+
 // TestReconciler reconciles a Test object
 type TestReconciler struct {
 	client.Client
@@ -54,7 +75,7 @@ type TestReconciler struct {
 //+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=tests/status,verbs=get;patch
 //+kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=pods/status,verbs=get
-//+kubebuilder:rbac:groups="",resources=events,verbs=create
+//+kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -81,6 +102,10 @@ func (r *TestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (res c
 		return
 	}
 	logger.Trace("retrieved test")
+
+	// Ensure the namespaced counters are initialized
+	passed.WithLabelValues(test.Namespace)
+	passed.WithLabelValues(test.Namespace)
 
 	// Retrieve any controlled pods
 	logger.Trace("getting pods")
@@ -356,6 +381,7 @@ func (r *TestReconciler) isRunning(ctx context.Context, test *konfirm.Test, pods
 			}
 		} else {
 			logger.Info("test Passed")
+			passed.WithLabelValues(test.Namespace).Inc()
 			r.Recorder.Eventf(test, "Normal", TestPassedEvent, "Pod %s succeeded", pod.Name)
 		}
 
@@ -383,6 +409,7 @@ func (r *TestReconciler) isRunning(ctx context.Context, test *konfirm.Test, pods
 			}
 		} else {
 			logger.Info("test Failed")
+			failed.WithLabelValues(test.Namespace).Inc()
 			r.Recorder.Eventf(test, "Normal", TestFailedEvent, "Pod %s failed", pod.Name)
 		}
 	}
