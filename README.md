@@ -1,8 +1,15 @@
-# konfirm
-// TODO(user): Add simple overview of use/purpose
+# Konfirm
+
+Automated integration testing in your Kubernetes clusters.
 
 ## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
+
+With Konfirm, in-cluster integration testing is as simple as:  
+ 1. Containerizing your integration tests.  
+ 2. Defining your tests in a Konfirm TestSuite Custom Resource.  
+ 3. Associating your TestSuite with a Konfirm Trigger.  
+
+When the trigger action is observed, Konfirm initiates your TestSuite, executing each integration test in a separte Pod. When the Pod completes, its exit code is used to determine Pass or Fail, and its termination message is retrieved. Test results are published as Prometheus metrics, allowing you to integrate Konfirm into your existing monitoring and alerting strategy.
 
 ## Getting Started
 You’ll need a Kubernetes cluster to run against. You can use [KIND](https://sigs.k8s.io/kind) to get a local cluster for testing, or run against a remote cluster.
@@ -78,7 +85,7 @@ More information can be found via the [Kubebuilder Documentation](https://book.k
 
 ## License
 
-Copyright 2022.
+Copyright 2022 Raft, LLC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -91,4 +98,3 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
-

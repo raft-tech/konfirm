@@ -2,5 +2,33 @@ domain: goraft.tech
 layout:
 - go.kubebuilder.io/v3
 projectName: konfirm
-repo: go.goraft.tech/konfirm
+repo: github.com/raft-tech/konfirm
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: goraft.tech
+  group: konfirm
+  kind: Test
+  path: github.com/raft-tech/konfirm/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: goraft.tech
+  group: konfirm
+  kind: TestSuite
+  path: github.com/raft-tech/konfirm/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: goraft.tech
+  group: konfirm
+  kind: TestRun
+  path: github.com/raft-tech/konfirm/api/v1alpha1
+  version: v1alpha1
 version: "3"

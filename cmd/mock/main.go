@@ -13,3 +13,33 @@
  See the License for the specific language governing permissions and
  limitations under the License.
 */
+
+package main
+
+import (
+	"io/ioutil"
+	"os"
+)
+
+func main() {
+	exitCode := 0
+	argv := os.Args
+	var message string
+	switch argc := len(argv); true {
+	case argc == 2:
+		if a := argv[1]; a == "--fail" {
+			exitCode = 1
+		} else {
+			message = a
+		}
+	case argc == 3:
+		if argv[1] == "--fail" {
+			exitCode = 1
+		}
+		message = argv[2]
+	}
+	if message != "" {
+		_ = ioutil.WriteFile("/dev/termination-log", []byte(message), 0644)
+	}
+	os.Exit(exitCode)
+}

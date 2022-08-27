@@ -13,3 +13,36 @@
  See the License for the specific language governing permissions and
  limitations under the License.
 */
+
+package controllers
+
+import (
+	"errors"
+	"strings"
+)
+
+type ErrorList struct {
+	errors []error
+}
+
+func (e *ErrorList) Append(err error) {
+	e.errors = append(e.errors, err)
+}
+
+func (e *ErrorList) HasError() bool {
+	return len(e.errors) > 0
+}
+
+func (e *ErrorList) Error() error {
+	if count := len(e.errors); count > 0 {
+		err := strings.Builder{}
+		err.WriteString(e.errors[0].Error())
+		for i := 1; i < count; i++ {
+			err.WriteString(e.errors[i].Error())
+			err.WriteRune('\n')
+		}
+		return errors.New(err.String())
+	} else {
+		return nil
+	}
+}
