@@ -18,6 +18,8 @@ package main
 
 import (
 	"flag"
+	"github.com/robfig/cron/v3"
+	"k8s.io/utils/clock"
 	"os"
 	"time"
 
@@ -108,6 +110,8 @@ func main() {
 		Scheme:          mgr.GetScheme(),
 		Recorder:        recorder,
 		ErrRequeueDelay: time.Minute,
+		CronParser:      cron.ParseStandard,
+		Clock:           clock.RealClock{},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "TestSuite")
 		os.Exit(1)

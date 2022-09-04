@@ -113,6 +113,8 @@ type TestSuiteStatus struct {
 	Phase TestSuitePhase `json:"phase,omitempty"`
 
 	CurrentTestRun string `json:"currentTestRun,omitempty"`
+
+	NextRun *metav1.Time `json:"nextRun,omitempty"`
 }
 
 // TestSuite is the Schema for the testsuites API

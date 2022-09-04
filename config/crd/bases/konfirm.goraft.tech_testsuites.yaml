@@ -8347,6 +8347,9 @@ spec:
                 type: array
               currentTestRun:
                 type: string
+              nextRun:
+                format: date-time
+                type: string
               phase:
                 default: Pending
                 description: Phase (Pending, Ready, Running, Error)
