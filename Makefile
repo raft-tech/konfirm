@@ -76,7 +76,7 @@ build-mock:
 	go build -o bin/mock ./cmd/mock
 
 .PHONY: docker-build
-docker-build: test ## Build docker image with the manager.
+docker-build: generate fmt vet ## Build docker image with the manager.
 	docker build -t ${IMG} .
 
 .PHONY: docker-build-mock

@@ -19,27 +19,28 @@ package controllers_test
 import (
 	"context"
 	"errors"
+	. "github.com/onsi/ginkgo"
 	"github.com/onsi/ginkgo/config"
+	. "github.com/onsi/gomega"
 	"github.com/raft-tech/konfirm/controllers"
 	"github.com/raft-tech/konfirm/logging"
+	"github.com/robfig/cron/v3"
 	"go.uber.org/zap/zapcore"
+	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
+	"k8s.io/utils/clock"
 	"math"
 	"math/rand"
 	"os"
 	"path/filepath"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"strings"
-	"testing"
-
-	. "github.com/onsi/ginkgo"
-	. "github.com/onsi/gomega"
-	"k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	"sigs.k8s.io/controller-runtime/pkg/envtest/printer"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"strings"
+	"testing"
 
 	konfirmv1alpha1 "github.com/raft-tech/konfirm/api/v1alpha1"
 	//+kubebuilder:scaffold:imports
@@ -55,6 +56,7 @@ var (
 	mgrCtx    context.Context
 	mgrCancel context.CancelFunc
 	trand     *rand.Rand
+	setClock  func(passiveClock clock.PassiveClock) clock.PassiveClock
 )
 
 func TestAPIs(t *testing.T) {
@@ -126,12 +128,22 @@ var _ = BeforeSuite(func() {
 	Expect(err).ToNot(HaveOccurred())
 
 	// Set up TestSuiteController
-	err = (&controllers.TestSuiteReconciler{
-		Client:   mgr.GetClient(),
-		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("testsuite-controller"),
-	}).SetupWithManager(mgr)
+	tsr := &controllers.TestSuiteReconciler{
+		Client:     mgr.GetClient(),
+		Scheme:     mgr.GetScheme(),
+		Recorder:   mgr.GetEventRecorderFor("testsuite-controller"),
+		CronParser: cron.ParseStandard,
+		Clock:      &clock.RealClock{},
+	}
+	err = (tsr).SetupWithManager(mgr)
 	Expect(err).ToNot(HaveOccurred())
+
+	// Allow replacing the clock
+	setClock = func(c clock.PassiveClock) clock.PassiveClock {
+		o := tsr.Clock
+		tsr.Clock = c
+		return o
+	}
 
 	// Start manager
 	mgrCtx, mgrCancel = context.WithCancel(context.TODO())

@@ -3,6 +3,8 @@ kind: TestSuite
 metadata:
   name: sample
 spec:
+    when:
+      cron: "1-59 * * * *"
     template:
       tests:
       - description: Generals gathered in their masses

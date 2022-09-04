@@ -23,10 +23,12 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	konfirm "github.com/raft-tech/konfirm/api/v1alpha1"
 	"github.com/raft-tech/konfirm/logging"
+	"github.com/robfig/cron/v3"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/utils/clock"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
@@ -37,8 +39,10 @@ import (
 const (
 	testRunIndexKey               = ".metadata.controller"
 	TestSuiteControllerFinalizer  = konfirm.GroupName + "/testsuite-controller"
+	TestSuiteScheduleAnnotation   = konfirm.GroupName + "/active-schedule"
 	TestSuiteNeedsRunCondition    = "NeedsRun"
 	TestSuiteRunStartedCondition  = "RunStarted"
+	TestSuiteHasScheduleCondition = "HasSchedule"
 	TestSuiteErrorCondition       = "HasError"
 	testSuiteControllerLoggerName = "testsuite-controller"
 )
@@ -74,6 +78,8 @@ type TestSuiteReconciler struct {
 	Scheme          *runtime.Scheme
 	Recorder        record.EventRecorder
 	ErrRequeueDelay time.Duration
+	CronParser      func(string) (cron.Schedule, error)
+	Clock           clock.PassiveClock
 }
 
 type testSuiteTrigger struct {
@@ -152,6 +158,49 @@ func (r *TestSuiteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{RequeueAfter: r.ErrRequeueDelay}, nil
 	} else if patched {
 		logger.Debug("added finalizer")
+	}
+
+	// Handle changes to scheduling
+	if sched := testSuite.Spec.When.Schedule; sched != "" {
+		if sched != testSuite.Annotations[TestSuiteScheduleAnnotation] {
+			if testSuite.Status.NextRun != nil {
+				orig := testSuite.DeepCopy()
+				testSuite.Status.NextRun = nil
+				logger.Trace("clearing next run")
+				if err := r.Status().Patch(ctx, &testSuite, client.MergeFrom(orig)); err != nil {
+					logger.Error(err, "error clearing next run")
+				}
+				logger.Debug("cleared next run")
+			}
+		}
+	} else {
+
+		orig := testSuite.DeepCopy()
+
+		if _, ok := testSuite.Annotations[TestSuiteScheduleAnnotation]; ok {
+			delete(testSuite.Annotations, TestSuiteScheduleAnnotation)
+			logger.Trace("removing active schedule")
+			if err := r.Client.Patch(ctx, &testSuite, client.MergeFrom(orig)); err != nil {
+				logger.Error(err, "error removing active schedule")
+				return ctrl.Result{RequeueAfter: r.ErrRequeueDelay}, nil
+			}
+			logger.Debug("removed active schedule")
+		}
+
+		testSuite.Status.NextRun = nil
+		meta.SetStatusCondition(&testSuite.Status.Conditions, metav1.Condition{
+			Type:               TestSuiteHasScheduleCondition,
+			Status:             metav1.ConditionFalse,
+			ObservedGeneration: testSuite.Generation,
+			Reason:             "ScheduleNotDefined",
+			Message:            "schedule is not defined",
+		})
+		logger.Trace("removing schedule")
+		if err := r.Status().Patch(ctx, &testSuite, client.MergeFrom(orig)); err != nil {
+			logger.Error(err, "error removing schedule")
+			return ctrl.Result{RequeueAfter: r.ErrRequeueDelay}, nil
+		}
+		logger.Debug("removed schedule")
 	}
 
 	// Handle deleted test runs
@@ -269,6 +318,65 @@ func (r *TestSuiteReconciler) notRunning(ctx context.Context, testSuite *konfirm
 		logger.Debug("old test runs removed")
 	}
 
+	// Ensure active schedule is set
+	var schedule cron.Schedule
+	if when := testSuite.Spec.When.Schedule; when != "" {
+
+		// Annotate with the current schedule
+		if testSuite.Annotations[TestSuiteScheduleAnnotation] != when {
+			orig := testSuite.DeepCopy()
+			if testSuite.Annotations == nil {
+				testSuite.Annotations = make(map[string]string)
+			}
+			testSuite.Annotations[TestSuiteScheduleAnnotation] = testSuite.Spec.When.Schedule
+			logger.Trace("setting active schedule")
+			if err := r.Client.Patch(ctx, testSuite, client.MergeFrom(orig)); err != nil {
+				logger.Error(err, "error setting active schedule")
+				return ctrl.Result{RequeueAfter: r.ErrRequeueDelay}, nil
+			}
+			logger.Debug("set active schedule")
+		}
+
+		// Parse the schedule and set next run
+		orig := testSuite.DeepCopy()
+		if sched, err := r.CronParser(when); err == nil {
+			schedule = sched
+			if testSuite.Status.NextRun == nil {
+				next := metav1.NewTime(schedule.Next(r.Clock.Now()))
+				testSuite.Status.NextRun = &next
+				meta.SetStatusCondition(&testSuite.Status.Conditions, metav1.Condition{
+					Type:               TestSuiteHasScheduleCondition,
+					Status:             metav1.ConditionTrue,
+					ObservedGeneration: testSuite.Generation,
+					Reason:             "ScheduleSet",
+					Message:            "schedule is set",
+				})
+				logger.Trace("setting next run", "nextRun", next.String())
+				if err = r.Status().Patch(ctx, testSuite, client.MergeFrom(orig)); err != nil {
+					logger.Error(err, "error setting next run")
+					return ctrl.Result{RequeueAfter: r.ErrRequeueDelay}, nil
+				}
+				logger.Debug("set next run", "nextRun", next.String())
+			}
+		} else {
+			// Schedule is defined but not valid
+			testSuite.Status.NextRun = nil
+			meta.SetStatusCondition(&testSuite.Status.Conditions, metav1.Condition{
+				Type:               TestSuiteHasScheduleCondition,
+				Status:             metav1.ConditionFalse,
+				ObservedGeneration: testSuite.Generation,
+				Reason:             "InvalidSchedule",
+				Message:            "schedule is not a valid cron value",
+			})
+			logger.Trace("setting schedule as invalid")
+			if err = r.Status().Patch(ctx, testSuite, client.MergeFrom(orig)); err != nil {
+				logger.Error(err, "error setting schedule as invalid")
+			} else {
+				logger.Debug("schedule set as invalid")
+			}
+		}
+	}
+
 	// Trigger a test run, if needed
 	var trigger *testSuiteTrigger
 	switch {
@@ -289,13 +397,36 @@ func (r *TestSuiteReconciler) notRunning(ctx context.Context, testSuite *konfirm
 		}
 		logger.Debug("reset manual trigger")
 
-	case r.needsScheduledRun(ctx, testSuite):
-		panic("not implemented")
-
 	case r.needsHelmRun(ctx, testSuite):
 		panic("not implemented")
 
+	case testSuite.Status.NextRun != nil:
+		if until := testSuite.Status.NextRun.Sub(r.Clock.Now()); until > 0 {
+			logger.Debug("requeuing for next scheduled run")
+			return ctrl.Result{RequeueAfter: until}, nil
+		} else if until < -10*time.Second {
+			orig := testSuite.DeepCopy()
+			next := metav1.NewTime(schedule.Next(r.Clock.Now()))
+			testSuite.Status.NextRun = &next
+			logger.Trace("setting next run")
+			if err := r.Status().Patch(ctx, testSuite, client.MergeFrom(orig)); err != nil {
+				logger.Error(err, "error setting next run")
+				return ctrl.Result{RequeueAfter: r.ErrRequeueDelay}, nil
+			}
+			logger.Debug("set next run")
+			logger.Info("missed scheduled run, requeueing")
+			return ctrl.Result{RequeueAfter: next.Sub(r.Clock.Now())}, nil
+		} else {
+			logger.Trace("test run triggered by schedule")
+			trigger = &testSuiteTrigger{
+				Reason:  "Scheduled",
+				Message: "test run triggered by schedule '" + testSuite.Spec.When.Schedule + "'",
+				Patch:   client.MergeFrom(testSuite.DeepCopy()),
+			}
+		}
+
 	default:
+		logger.Info("reconcile completed")
 		return ctrl.Result{}, nil
 	}
 
@@ -304,13 +435,13 @@ func (r *TestSuiteReconciler) notRunning(ctx context.Context, testSuite *konfirm
 	testSuite.Status.CurrentTestRun = ""
 	meta.SetStatusCondition(&testSuite.Status.Conditions, metav1.Condition{
 		Type:               TestSuiteNeedsRunCondition,
-		Status:             "True",
+		Status:             metav1.ConditionTrue,
 		ObservedGeneration: testSuite.Generation,
 		Reason:             trigger.Reason,
 		Message:            trigger.Message,
 	})
 	logger.Trace("setting test suite as Running")
-	if err := r.Client.Status().Patch(ctx, testSuite, trigger.Patch); err != nil {
+	if err := r.Status().Patch(ctx, testSuite, trigger.Patch); err != nil {
 		logger.Error(err, "error setting test suite as Running")
 		return ctrl.Result{RequeueAfter: r.ErrRequeueDelay}, nil
 	}
@@ -318,11 +449,6 @@ func (r *TestSuiteReconciler) notRunning(ctx context.Context, testSuite *konfirm
 	r.Recorder.Event(testSuite, "Normal", "TestSuiteTriggered", trigger.Message)
 
 	return ctrl.Result{}, nil
-}
-
-func (r *TestSuiteReconciler) needsScheduledRun(ctx context.Context, testSuite *konfirm.TestSuite) bool {
-	// TODO handle needsScheduledRun
-	return false
 }
 
 func (r *TestSuiteReconciler) needsHelmRun(ctx context.Context, testSuite *konfirm.TestSuite) bool {
@@ -397,19 +523,19 @@ func (r *TestSuiteReconciler) isRunning(ctx context.Context, testSuite *konfirm.
 		conditionMessage := fmt.Sprintf("created test run %s", currentRun.Name)
 		meta.SetStatusCondition(&testSuite.Status.Conditions, metav1.Condition{
 			Type:               TestSuiteNeedsRunCondition,
-			Status:             "False",
+			Status:             metav1.ConditionFalse,
 			ObservedGeneration: testSuite.Generation,
 			Reason:             conditionReason,
 			Message:            conditionMessage,
 		})
 		meta.SetStatusCondition(&testSuite.Status.Conditions, metav1.Condition{
 			Type:               TestSuiteRunStartedCondition,
-			Status:             "True",
+			Status:             metav1.ConditionTrue,
 			ObservedGeneration: testSuite.Generation,
 			Reason:             conditionReason,
 			Message:            conditionMessage,
 		})
-		if err := r.Client.Status().Patch(ctx, testSuite, client.MergeFrom(orig)); err != nil {
+		if err := r.Status().Patch(ctx, testSuite, client.MergeFrom(orig)); err != nil {
 			logger.Error(err, "error setting status")
 			return ctrl.Result{RequeueAfter: r.ErrRequeueDelay}, nil
 		}
@@ -427,12 +553,12 @@ func (r *TestSuiteReconciler) isRunning(ctx context.Context, testSuite *konfirm.
 		testSuite.Status.CurrentTestRun = ""
 		meta.SetStatusCondition(&testSuite.Status.Conditions, metav1.Condition{
 			Type:               TestSuiteRunStartedCondition,
-			Status:             "False",
+			Status:             metav1.ConditionFalse,
 			ObservedGeneration: testSuite.Generation,
 			Reason:             "TestRunCompleted",
 			Message:            fmt.Sprintf("test run %s completed", currentRun.Name),
 		})
-		if err := r.Client.Status().Patch(ctx, testSuite, client.MergeFrom(orig)); err != nil {
+		if err := r.Status().Patch(ctx, testSuite, client.MergeFrom(orig)); err != nil {
 			logger.Error(err, "error setting status")
 			return ctrl.Result{RequeueAfter: r.ErrRequeueDelay}, nil
 		}
