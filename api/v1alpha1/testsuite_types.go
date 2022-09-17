@@ -116,10 +116,10 @@ type TestSuiteStatus struct {
 }
 
 // TestSuite is the Schema for the testsuites API
-//+kubebuilder:object:root=true
-//+kubebuilder:resource:shortName=ts
-//+kubebuilder:subresource:trigger
-//+kubebuilder:subresource:status
+// +kubebuilder:object:root=true
+// +kubebuilder:resource:shortName=ts
+// +kubebuilder:subresource:trigger
+// +kubebuilder:subresource:status
 type TestSuite struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -129,7 +129,7 @@ type TestSuite struct {
 }
 
 // TestSuiteList contains a list of TestSuite
-//+kubebuilder:object:root=true
+// +kubebuilder:object:root=true
 type TestSuiteList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
