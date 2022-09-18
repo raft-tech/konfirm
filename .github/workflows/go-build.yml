@@ -1,0 +1,40 @@
+name: Go Build
+
+on:
+  push:
+    branches: [ "develop", "feature/workflows" ]
+  pull_request:
+    branches: [ "develop" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Go
+        uses: actions/setup-go@v3
+        with:
+          cache: true
+          go-version: 1.19
+      - name: Install Dependencies
+        run: go get .
+      - name: Verify
+        run: go vet ./...
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        k8s-version: ["1.22", "1.23", "1.24", "1.25"]
+    env:
+      ENVTEST_K8S_VERSION: ${{ matrix.k8s-version }}
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Go
+        uses: actions/setup-go@v3
+        with:
+          cache: true
+          go-version: 1.19
+      - name: Set up envtest
+        run: make envtest
+      - name: Test
+        run: KUBEBUILDER_ASSETS="$(bin/envtest use $(ENVTEST_K8S_VERSION) -p path)" go test ./...
