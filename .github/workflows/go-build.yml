@@ -36,8 +36,8 @@ jobs:
           cache: true
           go-version: 1.19
       - name: Set up envtest
-        run: make envtest
-      - name: ls
-        run: ls bin
+        run: |
+          make envtest
+          export KUBEBUILDER_ASSETS=$(bin/setup-envtest use $ENVTEST_K8S_VERSION -p path)
       - name: Test
-        run: ./bin/envtest use $ENVTEST_K8S_VERSION -p path
+        run: go test ./...
