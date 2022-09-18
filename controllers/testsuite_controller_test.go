@@ -23,10 +23,14 @@ import (
 	. "github.com/onsi/gomega"
 	konfirm "github.com/raft-tech/konfirm/api/v1alpha1"
 	"github.com/raft-tech/konfirm/controllers"
+	"github.com/robfig/cron/v3"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/clock"
+	tclock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"time"
 )
 
 var _ = Describe("TestSuite Controller", func() {
@@ -85,18 +89,242 @@ var _ = Describe("TestSuite Controller", func() {
 
 	When("a test suite is created", func() {
 
-		BeforeEach(func() {
+		JustBeforeEach(func() {
 			Expect(k8sClient.Create(ctx, testSuite)).NotTo(HaveOccurred())
 		})
 
-		AfterEach(func() {
-			Expect(k8sClient.Delete(ctx, testSuite)).NotTo(HaveOccurred())
+		JustAfterEach(func() {
+			Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, testSuite))).NotTo(HaveOccurred())
 		})
 
 		It("it reaches the Ready state", func() {
 			Eventually(func() (konfirm.TestSuitePhase, error) {
 				return testSuite.Status.Phase, k8sClient.Get(ctx, client.ObjectKeyFromObject(testSuite), testSuite)
 			}, timeout).Should(Equal(konfirm.TestSuiteReady))
+		})
+
+		When("a schedule is defined", func() {
+
+			var next *time.Time
+
+			BeforeEach(func() {
+				// Ensure an hour between now and the next test run
+				now := time.Now()
+				min, hour := now.Minute(), now.Hour()+1
+				if hour > 23 {
+					hour = hour - 24
+				}
+				testSuite.Spec.When.Schedule = fmt.Sprintf("%d %d * * *", min, hour)
+			})
+
+			JustBeforeEach(func() {
+				if s, err := cron.ParseStandard(testSuite.Spec.When.Schedule); err == nil {
+					n := s.Next(time.Now())
+					next = &n
+				}
+			})
+
+			It("schedules the next test run", func() {
+				Eventually(func() (*metav1.Time, error) {
+					err := k8sClient.Get(ctx, client.ObjectKeyFromObject(testSuite), testSuite)
+					return testSuite.Status.NextRun, err
+				}, timeout).Should(Satisfy(func(t interface{}) bool {
+					if t, ok := t.(*metav1.Time); ok {
+						return t != nil && next.Equal(t.Time)
+					} else {
+						return false
+					}
+				}))
+				Expect(testSuite.Annotations[controllers.TestSuiteScheduleAnnotation]).To(Equal(testSuite.Spec.When.Schedule))
+				Expect(testSuite.Status.Conditions).To(ContainElement(And(
+					HaveField("Type", controllers.TestSuiteHasScheduleCondition),
+					HaveField("Status", metav1.ConditionTrue),
+					HaveField("Reason", "ScheduleSet"),
+					HaveField("Message", "schedule is set"),
+				)))
+			})
+
+			It("clears the schedule when it is removed", func() {
+
+				// Wait for NextRun to be set
+				Eventually(func() (*metav1.Time, error) {
+					err := k8sClient.Get(ctx, client.ObjectKeyFromObject(testSuite), testSuite)
+					return testSuite.Status.NextRun, err
+				}, timeout).Should(Satisfy(func(t interface{}) bool {
+					if t, ok := t.(*metav1.Time); ok {
+						return t != nil && next.Equal(t.Time)
+					} else {
+						return false
+					}
+				}))
+
+				// Remove the schedule
+				orig := testSuite.DeepCopy()
+				testSuite.Spec.When.Schedule = ""
+				Expect(k8sClient.Patch(ctx, testSuite, client.MergeFrom(orig))).NotTo(HaveOccurred())
+
+				// Verify next run is removed
+				Eventually(func() (*metav1.Time, error) {
+					err := k8sClient.Get(ctx, client.ObjectKeyFromObject(testSuite), testSuite)
+					return testSuite.Status.NextRun, err
+				}, timeout).Should(BeNil())
+				Expect(testSuite.Annotations).NotTo(HaveKey(controllers.TestSuiteScheduleAnnotation))
+				Expect(testSuite.Status.Conditions).To(ContainElement(And(
+					HaveField("Type", controllers.TestSuiteHasScheduleCondition),
+					HaveField("Status", metav1.ConditionFalse),
+					HaveField("Reason", "ScheduleNotDefined"),
+					HaveField("Message", "schedule is not defined"),
+				)))
+			})
+
+			When("the schedule is not valid", func() {
+
+				BeforeEach(func() {
+					testSuite.Spec.When.Schedule = "not valid"
+				})
+
+				It("records the error", func() {
+					Eventually(func() ([]metav1.Condition, error) {
+						err := k8sClient.Get(ctx, client.ObjectKeyFromObject(testSuite), testSuite)
+						return testSuite.Status.Conditions, err
+					}).Should(ContainElement(And(
+						HaveField("Type", controllers.TestSuiteHasScheduleCondition),
+						HaveField("Status", metav1.ConditionFalse),
+						HaveField("Reason", "InvalidSchedule"),
+						HaveField("Message", "schedule is not a valid cron value"),
+					)))
+					Expect(testSuite.Annotations[controllers.TestSuiteScheduleAnnotation]).To(Equal(testSuite.Spec.When.Schedule))
+					Expect(testSuite.Status.NextRun).To(BeNil())
+				})
+			})
+
+			When("the NextRun is reached", func() {
+
+				var origClock clock.PassiveClock
+
+				JustBeforeEach(func() {
+
+					// Let the next run be set
+					Eventually(func() (*metav1.Time, error) {
+						err := k8sClient.Get(ctx, client.ObjectKeyFromObject(testSuite), testSuite)
+						return testSuite.Status.NextRun, err
+					}, timeout).Should(Satisfy(func(t interface{}) bool {
+						if t, ok := t.(*metav1.Time); ok {
+							return t != nil && next.Equal(t.Time)
+						} else {
+							return false
+						}
+					}))
+
+					// Time travel
+					clk := tclock.NewFakePassiveClock(*next)
+					origClock = setClock(clk)
+					if s, err := cron.ParseStandard(testSuite.Spec.When.Schedule); err == nil {
+						n := s.Next(clk.Now())
+						next = &n
+					} else {
+						Expect(err).NotTo(HaveOccurred())
+					}
+
+					// Poke the TestSuite to trigger a reconciliation
+					orig := testSuite.DeepCopy()
+					patched := orig.DeepCopy()
+					if patched.Annotations == nil {
+						patched.Annotations = make(map[string]string)
+					}
+					patched.Annotations[konfirm.GroupName+"/touch"] = clk.Now().Format(time.RFC3339)
+					Expect(k8sClient.Patch(ctx, patched, client.MergeFrom(orig)))
+				})
+
+				JustAfterEach(func() {
+					// Revert to a real clock
+					setClock(origClock)
+				})
+
+				It("Triggers a run", func() {
+					Eventually(func() (konfirm.TestSuitePhase, error) {
+						err := k8sClient.Get(ctx, client.ObjectKeyFromObject(testSuite), testSuite)
+						return testSuite.Status.Phase, err
+					}, timeout).Should(Equal(konfirm.TestSuiteRunning))
+				})
+			})
+
+			When("the NextRun is missed", func() {
+
+				var origClock clock.PassiveClock
+
+				BeforeEach(func() {
+					// Schedule for 5 min from now
+					now := time.Now()
+					min, hour := now.Minute()+5, now.Hour()
+					if min > 59 {
+						min = min - 60
+						hour++
+					}
+					if hour > 23 {
+						hour = hour - 24
+					}
+					testSuite.Spec.When.Schedule = fmt.Sprintf("%d %d * * *", min, hour)
+				})
+
+				JustBeforeEach(func() {
+
+					// Let the next run be set
+					Eventually(func() (*metav1.Time, error) {
+						err := k8sClient.Get(ctx, client.ObjectKeyFromObject(testSuite), testSuite)
+						return testSuite.Status.NextRun, err
+					}, timeout).Should(Satisfy(func(t interface{}) bool {
+						if t, ok := t.(*metav1.Time); ok {
+							return t != nil && next.Equal(t.Time)
+						} else {
+							return false
+						}
+					}))
+
+					// Time travel
+					clk := tclock.NewFakePassiveClock(time.Now().Add(6 * time.Minute))
+					origClock = setClock(clk)
+					if s, err := cron.ParseStandard(testSuite.Spec.When.Schedule); err == nil {
+						n := s.Next(clk.Now())
+						next = &n
+					} else {
+						Expect(err).NotTo(HaveOccurred())
+					}
+
+					// Poke the TestSuite to trigger a reconciliation
+					orig := testSuite.DeepCopy()
+					patched := orig.DeepCopy()
+					if patched.Annotations == nil {
+						patched.Annotations = make(map[string]string)
+					}
+					patched.Annotations[konfirm.GroupName+"/touch"] = clk.Now().Format(time.RFC3339)
+					Expect(k8sClient.Patch(ctx, patched, client.MergeFrom(orig)))
+				})
+
+				JustAfterEach(func() {
+					// Revert to a real clock
+					setClock(origClock)
+				})
+
+				It("Updates the NextRun", func() {
+					Eventually(func() (*metav1.Time, error) {
+						err := k8sClient.Get(ctx, client.ObjectKeyFromObject(testSuite), testSuite)
+						return testSuite.Status.NextRun, err
+					}, timeout).Should(Satisfy(func(t interface{}) bool {
+						if t, ok := t.(*metav1.Time); ok {
+							return t != nil && next.Equal(t.Time)
+						} else {
+							return false
+						}
+					}))
+					Expect(testSuite.Status.Conditions).To(ContainElement(And(
+						HaveField("Type", controllers.TestSuiteHasScheduleCondition),
+						HaveField("Status", metav1.ConditionTrue),
+						HaveField("Reason", "ScheduleSet"),
+						HaveField("Message", "schedule is set"),
+					)))
+				})
+			})
 		})
 	})
 
@@ -124,7 +352,7 @@ var _ = Describe("TestSuite Controller", func() {
 					g.Expect(testSuite.Status.Phase).To(Equal(konfirm.TestSuiteRunning))
 					g.Expect(testSuite.Status.Conditions).To(HaveKey(And(
 						HaveField("Type", controllers.TestSuiteRunStartedCondition),
-						HaveField("Status", "True"),
+						HaveField("Status", metav1.ConditionTrue),
 						HaveField("Reason", "Manual"),
 						HaveField("Message", "TestSuite was manually triggered"),
 					)))
