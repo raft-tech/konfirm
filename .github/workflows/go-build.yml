@@ -38,6 +38,6 @@ jobs:
       - name: Set up envtest
         run: |
           make envtest
-          bin/setup-envtest use $ENVTEST_K8S_VERSION -p path >> $KUBEBUILDER_ASSETS
+          echo "KUBEBUILDER_ASSETS=$(bin/setup-envtest use $ENVTEST_K8S_VERSION -p path)" >> $GITHUB_ENV
       - name: Test
         run: go test ./...
