@@ -37,5 +37,9 @@ jobs:
           go-version: 1.19
       - name: Set up envtest
         run: make envtest
+      - name: env
+        run: env
+      - name: ls
+        run: ls
       - name: Test
         run: bin/envtest use $ENVTEST_K8S_VERSION -p path
