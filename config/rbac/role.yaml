@@ -33,6 +33,22 @@ rules:
 - apiGroups:
   - konfirm.goraft.tech
   resources:
+  - helmtriggers
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - konfirm.goraft.tech
+  resources:
+  - helmtriggers/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - konfirm.goraft.tech
+  resources:
   - testruns
   verbs:
   - create

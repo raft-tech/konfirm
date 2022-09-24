@@ -18,10 +18,11 @@ package main
 
 import (
 	"flag"
-	"github.com/robfig/cron/v3"
-	"k8s.io/utils/clock"
 	"os"
 	"time"
+
+	"github.com/robfig/cron/v3"
+	"k8s.io/utils/clock"
 
 	"github.com/raft-tech/konfirm/logging"
 
@@ -114,6 +115,13 @@ func main() {
 		Clock:           clock.RealClock{},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "TestSuite")
+		os.Exit(1)
+	}
+	if err = (&controllers.HelmTriggerReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "HelmTrigger")
 		os.Exit(1)
 	}
 	//+kubebuilder:scaffold:builder

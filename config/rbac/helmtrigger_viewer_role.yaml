@@ -1,0 +1,20 @@
+# permissions for end users to view helmtriggers.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: helmtrigger-viewer-role
+rules:
+- apiGroups:
+  - konfirm.goraft.tech
+  resources:
+  - helmtriggers
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - konfirm.goraft.tech
+  resources:
+  - helmtriggers/status
+  verbs:
+  - get

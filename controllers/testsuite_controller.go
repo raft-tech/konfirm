@@ -37,14 +37,15 @@ import (
 )
 
 const (
-	testRunIndexKey               = ".metadata.controller"
-	TestSuiteControllerFinalizer  = konfirm.GroupName + "/testsuite-controller"
-	TestSuiteScheduleAnnotation   = konfirm.GroupName + "/active-schedule"
-	TestSuiteNeedsRunCondition    = "NeedsRun"
-	TestSuiteRunStartedCondition  = "RunStarted"
-	TestSuiteHasScheduleCondition = "HasSchedule"
-	TestSuiteErrorCondition       = "HasError"
-	testSuiteControllerLoggerName = "testsuite-controller"
+	testRunIndexKey                    = ".metadata.controller"
+	TestSuiteControllerFinalizer       = konfirm.GroupName + "/testsuite-controller"
+	TestSuiteScheduleAnnotation        = konfirm.GroupName + "/active-schedule"
+	TestSuiteLastHelmTriggerAnnotation = konfirm.GroupName + "/last-helm-trigger"
+	TestSuiteNeedsRunCondition         = "NeedsRun"
+	TestSuiteRunStartedCondition       = "RunStarted"
+	TestSuiteHasScheduleCondition      = "HasSchedule"
+	TestSuiteErrorCondition            = "HasError"
+	testSuiteControllerLoggerName      = "testsuite-controller"
 )
 
 var (
@@ -201,6 +202,20 @@ func (r *TestSuiteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			return ctrl.Result{RequeueAfter: r.ErrRequeueDelay}, nil
 		}
 		logger.Debug("removed schedule")
+	}
+
+	// Handle changes to Helm triggers
+	if release := testSuite.Spec.When.HelmRelease; release != "" {
+		if testSuite.ObjectMeta.Labels[HelmTriggerLabel] != release {
+			orig := testSuite.DeepCopy()
+			testSuite.Labels[HelmTriggerLabel] = release
+			delete(testSuite.Annotations, "TestSuiteLastHelmTriggerAnnotation")
+			logger.Trace("patching helm metadata")
+			if err := r.Patch(ctx, &testSuite, client.MergeFrom(orig)); err != nil {
+				logger.Error(err, "error patching helm metadata")
+			}
+			logger.Debug("patched helm metadata")
+		}
 	}
 
 	// Handle deleted test runs
@@ -398,7 +413,13 @@ func (r *TestSuiteReconciler) notRunning(ctx context.Context, testSuite *konfirm
 		logger.Debug("reset manual trigger")
 
 	case r.needsHelmRun(ctx, testSuite):
-		panic("not implemented")
+		logger.Trace("test suite was triggered by a Helm release")
+		trigger = &testSuiteTrigger{
+			Reason:  "Helm",
+			Message: "Test suite was triggered by a Helm release",
+			Patch:   client.MergeFrom(testSuite.DeepCopy()),
+		}
+		testSuite.Annotations[TestSuiteLastHelmTriggerAnnotation] = testSuite.Annotations[HelmTriggerVersionAnnotation]
 
 	case testSuite.Status.NextRun != nil:
 		if until := testSuite.Status.NextRun.Sub(r.Clock.Now()); until > 0 {
@@ -452,7 +473,9 @@ func (r *TestSuiteReconciler) notRunning(ctx context.Context, testSuite *konfirm
 }
 
 func (r *TestSuiteReconciler) needsHelmRun(ctx context.Context, testSuite *konfirm.TestSuite) bool {
-	// TODO handle needsHelmRun
+	if current, ok := testSuite.Annotations[HelmTriggerVersionAnnotation]; ok {
+		return testSuite.Annotations[TestSuiteLastHelmTriggerAnnotation] != current
+	}
 	return false
 }
 
