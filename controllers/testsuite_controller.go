@@ -24,15 +24,21 @@ import (
 	konfirm "github.com/raft-tech/konfirm/api/v1alpha1"
 	"github.com/raft-tech/konfirm/logging"
 	"github.com/robfig/cron/v3"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/clock"
+	"k8s.io/utils/strings/slices"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -40,7 +46,8 @@ const (
 	testRunIndexKey                    = ".metadata.controller"
 	TestSuiteControllerFinalizer       = konfirm.GroupName + "/testsuite-controller"
 	TestSuiteScheduleAnnotation        = konfirm.GroupName + "/active-schedule"
-	TestSuiteLastHelmTriggerAnnotation = konfirm.GroupName + "/last-helm-trigger"
+	TestSuiteLastHelmReleaseAnnotation = konfirm.GroupName + "/last-helm-release"
+	TestSuiteHelmTriggerLabel          = konfirm.GroupName + "/helm-trigger"
 	TestSuiteNeedsRunCondition         = "NeedsRun"
 	TestSuiteRunStartedCondition       = "RunStarted"
 	TestSuiteHasScheduleCondition      = "HasSchedule"
@@ -206,10 +213,10 @@ func (r *TestSuiteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	// Handle changes to Helm triggers
 	if release := testSuite.Spec.When.HelmRelease; release != "" {
-		if testSuite.ObjectMeta.Labels[HelmTriggerLabel] != release {
+		if testSuite.ObjectMeta.Labels[TestSuiteHelmTriggerLabel] != release {
 			orig := testSuite.DeepCopy()
-			testSuite.Labels[HelmTriggerLabel] = release
-			delete(testSuite.Annotations, "TestSuiteLastHelmTriggerAnnotation")
+			testSuite.Labels[TestSuiteHelmTriggerLabel] = release
+			delete(testSuite.Annotations, "TestSuiteLastHelmReleaseAnnotation")
 			logger.Trace("patching helm metadata")
 			if err := r.Patch(ctx, &testSuite, client.MergeFrom(orig)); err != nil {
 				logger.Error(err, "error patching helm metadata")
@@ -392,6 +399,59 @@ func (r *TestSuiteReconciler) notRunning(ctx context.Context, testSuite *konfirm
 		}
 	}
 
+	// Determine the current Helm release
+	var currentHelmRelase *HelmReleaseMeta
+	if releaseName := testSuite.Spec.When.HelmRelease; releaseName != "" {
+
+		release := types.NamespacedName{
+			Namespace: testSuite.Namespace,
+			Name:      releaseName,
+		}
+
+		// If the release is in another namespace, it must be exported to the test suite's namespace to be observed
+		ok := true
+		if pos := strings.Index(releaseName, string(types.Separator)); pos != -1 && pos < len(releaseName)-1 {
+			release.Namespace = releaseName[:pos]
+			release.Name = releaseName[pos+1:]
+			policy := konfirm.HelmPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      release.Name,
+					Namespace: release.Namespace,
+				},
+			}
+			if err := r.Get(ctx, client.ObjectKeyFromObject(&policy), &policy); err == nil {
+				ok = slices.Contains(policy.Spec.ExportTo, testSuite.Namespace)
+			} else {
+				if err = client.IgnoreNotFound(err); err != nil {
+					logger.Error(err, "error retrieving helm policy")
+					return ctrl.Result{RequeueAfter: r.ErrRequeueDelay}, nil
+				} else {
+					logger.Info("ignoring unexported helm release trigger from another namespace")
+					ok = false
+				}
+			}
+		}
+
+		if ok {
+			logger.Trace("listing matching helm releases")
+			releases := v1.SecretList{}
+			matchingFields := client.MatchingFields(map[string]string{"type": HelmSecretType})
+			matchingLabels := client.MatchingLabels(map[string]string{"name": release.Name, "status": "deployed"})
+			if err := r.List(ctx, &releases, client.InNamespace(release.Namespace), matchingFields, matchingLabels); err != nil {
+				logger.Error(err, "error listing Helm release secrets")
+				return ctrl.Result{RequeueAfter: r.ErrRequeueDelay}, nil
+			}
+			logger.Debug("retrieved matching helm releases")
+			for i := range releases.Items {
+				if parsed, ok := ParseHelmReleaseSecret(&releases.Items[i]); ok {
+					if currentHelmRelase == nil || currentHelmRelase.Version < parsed.Version {
+						currentHelmRelase = parsed
+					}
+				}
+			}
+		}
+	}
+
 	// Trigger a test run, if needed
 	var trigger *testSuiteTrigger
 	switch {
@@ -412,14 +472,20 @@ func (r *TestSuiteReconciler) notRunning(ctx context.Context, testSuite *konfirm
 		}
 		logger.Debug("reset manual trigger")
 
-	case r.needsHelmRun(ctx, testSuite):
+	case currentHelmRelase != nil && currentHelmRelase.VersionString != testSuite.Annotations[TestSuiteLastHelmReleaseAnnotation]:
 		logger.Trace("test suite was triggered by a Helm release")
 		trigger = &testSuiteTrigger{
 			Reason:  "Helm",
 			Message: "Test suite was triggered by a Helm release",
 			Patch:   client.MergeFrom(testSuite.DeepCopy()),
 		}
-		testSuite.Annotations[TestSuiteLastHelmTriggerAnnotation] = testSuite.Annotations[HelmTriggerVersionAnnotation]
+		testSuite.Annotations[TestSuiteLastHelmReleaseAnnotation] = testSuite.Annotations[currentHelmRelase.VersionString]
+		logger.Trace("annotating last helm release")
+		if err := r.Patch(ctx, testSuite, trigger.Patch); err != nil {
+			logger.Error(err, "error setting helm release annotation")
+			return ctrl.Result{RequeueAfter: r.ErrRequeueDelay}, nil
+		}
+		logger.Debug("annotated last helm release")
 
 	case testSuite.Status.NextRun != nil:
 		if until := testSuite.Status.NextRun.Sub(r.Clock.Now()); until > 0 {
@@ -470,13 +536,6 @@ func (r *TestSuiteReconciler) notRunning(ctx context.Context, testSuite *konfirm
 	r.Recorder.Event(testSuite, "Normal", "TestSuiteTriggered", trigger.Message)
 
 	return ctrl.Result{}, nil
-}
-
-func (r *TestSuiteReconciler) needsHelmRun(ctx context.Context, testSuite *konfirm.TestSuite) bool {
-	if current, ok := testSuite.Annotations[HelmTriggerVersionAnnotation]; ok {
-		return testSuite.Annotations[TestSuiteLastHelmTriggerAnnotation] != current
-	}
-	return false
 }
 
 func (r *TestSuiteReconciler) isRunning(ctx context.Context, testSuite *konfirm.TestSuite, testRuns *konfirm.TestRunList) (ctrl.Result, error) {
@@ -628,5 +687,6 @@ func (r *TestSuiteReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		// Uncomment the following line adding a pointer to an instance of the controlled resource as an argument
 		For(&konfirm.TestSuite{}).
 		Owns(&konfirm.TestRun{}).
+		Watches(&source.Kind{Type: &v1.Secret{}}, &EnqueueForHelmTrigger{Client: mgr.GetClient()}, builder.WithPredicates(&IsHelmRelease{})).
 		Complete(r)
 }

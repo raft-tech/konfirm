@@ -37,7 +37,7 @@ resources:
   controller: true
   domain: goraft.tech
   group: konfirm
-  kind: HelmTrigger
+  kind: HelmPolicy
   path: github.com/raft-tech/konfirm/api/v1alpha1
   version: v1alpha1
 version: "3"

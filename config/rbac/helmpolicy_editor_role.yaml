@@ -1,13 +1,13 @@
-# permissions for end users to edit helmtriggers.
+# permissions for end users to edit helmpolicies.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: helmtrigger-editor-role
+  name: helmpolicy-editor-role
 rules:
 - apiGroups:
   - konfirm.goraft.tech
   resources:
-  - helmtriggers
+  - helmpolicies
   verbs:
   - create
   - delete
@@ -19,6 +19,6 @@ rules:
 - apiGroups:
   - konfirm.goraft.tech
   resources:
-  - helmtriggers/status
+  - helmpolicies/status
   verbs:
   - get

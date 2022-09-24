@@ -5,20 +5,20 @@ metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.8.0
   creationTimestamp: null
-  name: helmtriggers.konfirm.goraft.tech
+  name: helmpolicies.konfirm.goraft.tech
 spec:
   group: konfirm.goraft.tech
   names:
-    kind: HelmTrigger
-    listKind: HelmTriggerList
-    plural: helmtriggers
-    singular: helmtrigger
+    kind: HelmPolicy
+    listKind: HelmPolicyList
+    plural: helmpolicies
+    singular: helmpolicy
   scope: Namespaced
   versions:
   - name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: HelmTrigger is the Schema for the helmtriggers API
+        description: HelmPolicy is the Schema for the helmpolicies API
         properties:
           apiVersion:
             description: 'APIVersion defines the versioned schema of this representation
@@ -33,24 +33,18 @@ spec:
           metadata:
             type: object
           spec:
-            description: HelmTriggerSpec defines the desired state of HelmTrigger
+            description: HelmPolicySpec defines the desired state of HelmPolicy
             properties:
               exportTo:
+                description: ExportTo specifies namespaces permitted to observe a
+                  release
                 items:
                   type: string
                 type: array
             type: object
-          status:
-            description: HelmTriggerStatus defines the observed state of HelmTrigger
-            properties:
-              currentVersion:
-                type: integer
-            type: object
         type: object
     served: true
     storage: true
-    subresources:
-      status: {}
 status:
   acceptedNames:
     kind: ""

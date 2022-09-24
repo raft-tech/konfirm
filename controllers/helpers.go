@@ -22,9 +22,12 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	konfirm "github.com/raft-tech/konfirm/api/v1alpha1"
 	"hash/fnv"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/rand"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"strconv"
 )
 
 const (
@@ -142,4 +145,47 @@ func computeTestRunHash(testRun *konfirm.TestRunSpec) string {
 	_, _ = printer.Fprintf(hasher, "%#v", testRun)
 	digest := fmt.Sprint(hasher.Sum32())
 	return rand.SafeEncodeString(digest)
+}
+
+// HelmReleaseMeta describes a Helm Release.
+type HelmReleaseMeta struct {
+	types.NamespacedName
+	Version       int
+	VersionString string
+	Status        string
+}
+
+// ParseHelmReleaseSecret generates HelmReleaseMeta based on the
+// provided v1.Secret. If the provided Secret does not appear to be a valid Helm
+// release, the return boolean will be false; otherwise it will be true.
+func ParseHelmReleaseSecret(secret *v1.Secret) (release *HelmReleaseMeta, ok bool) {
+
+	if secret == nil || secret.Type != HelmSecretType {
+		return
+	} else {
+		ok = true
+		release = &HelmReleaseMeta{}
+		release.Namespace = secret.Namespace
+	}
+
+	if release.Name, ok = secret.Labels["name"]; !ok {
+		return
+	}
+
+	if release.VersionString, ok = secret.Labels["version"]; !ok {
+		return
+	}
+
+	if release.Status, ok = secret.Labels["status"]; !ok {
+		return
+	}
+
+	if v, err := strconv.Atoi(release.VersionString); err == nil {
+		release.Version = v
+	} else {
+		ok = false
+		return
+	}
+
+	return
 }
