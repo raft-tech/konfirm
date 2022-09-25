@@ -35,7 +35,7 @@ import (
 
 var _ = Describe("TestSuite Controller", func() {
 
-	const timeout = "100ms"
+	const timeout = "500ms"
 
 	var (
 		ctx       context.Context
@@ -187,7 +187,7 @@ var _ = Describe("TestSuite Controller", func() {
 					Eventually(func() ([]metav1.Condition, error) {
 						err := k8sClient.Get(ctx, client.ObjectKeyFromObject(testSuite), testSuite)
 						return testSuite.Status.Conditions, err
-					}).Should(ContainElement(And(
+					}, timeout).Should(ContainElement(And(
 						HaveField("Type", controllers.TestSuiteHasScheduleCondition),
 						HaveField("Status", metav1.ConditionFalse),
 						HaveField("Reason", "InvalidSchedule"),
@@ -338,7 +338,7 @@ var _ = Describe("TestSuite Controller", func() {
 					err = k8sClient.Get(ctx, client.ObjectKeyFromObject(testSuite), testSuite)
 					labels = testSuite.Labels
 					return
-				}).Should(HaveKeyWithValue(controllers.TestSuiteHelmTriggerLabel, testSuite.Namespace+"."+testSuite.Spec.When.HelmRelease))
+				}, timeout).Should(HaveKeyWithValue(controllers.TestSuiteHelmTriggerLabel, testSuite.Namespace+"."+testSuite.Spec.When.HelmRelease))
 			})
 
 			When("the Helm release exists", func() {
@@ -374,7 +374,7 @@ var _ = Describe("TestSuite Controller", func() {
 							HaveField("Reason", "HelmRelease"),
 							HaveField("Message", "TestSuite was manually triggered"),
 						)))
-					})
+					}, timeout)
 				})
 			})
 		})
@@ -408,7 +408,7 @@ var _ = Describe("TestSuite Controller", func() {
 						HaveField("Reason", "Manual"),
 						HaveField("Message", "TestSuite was manually triggered"),
 					)))
-				})
+				}, timeout)
 			})
 		})
 
@@ -456,7 +456,7 @@ var _ = Describe("TestSuite Controller", func() {
 							HaveField("Reason", "HelmRelease"),
 							HaveField("Message", "TestSuite was manually triggered"),
 						)))
-					})
+					}, timeout)
 				})
 			})
 
@@ -502,7 +502,7 @@ var _ = Describe("TestSuite Controller", func() {
 								HaveField("Reason", "HelmRelease"),
 								HaveField("Message", "TestSuite was manually triggered"),
 							)))
-						})
+						}, timeout)
 					})
 				})
 
@@ -552,7 +552,7 @@ var _ = Describe("TestSuite Controller", func() {
 									HaveField("Reason", "HelmRelease"),
 									HaveField("Message", "TestSuite was manually triggered"),
 								)))
-							})
+							}, timeout)
 						})
 
 						When("the HelmPolicy exports to all namespaces", func() {
@@ -572,7 +572,7 @@ var _ = Describe("TestSuite Controller", func() {
 										HaveField("Reason", "HelmRelease"),
 										HaveField("Message", "TestSuite was manually triggered"),
 									)))
-								})
+								}, timeout)
 							})
 						})
 
@@ -593,7 +593,7 @@ var _ = Describe("TestSuite Controller", func() {
 										HaveField("Reason", "HelmRelease"),
 										HaveField("Message", "TestSuite was manually triggered"),
 									)))
-								})
+								}, timeout)
 							})
 						})
 					})
