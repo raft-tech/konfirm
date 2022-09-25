@@ -213,8 +213,14 @@ func (r *TestSuiteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	// Handle changes to Helm triggers
 	if release := testSuite.Spec.When.HelmRelease; release != "" {
+		if strings.Index(release, ".") == -1 {
+			release = testSuite.Namespace + "." + release
+		}
 		if testSuite.ObjectMeta.Labels[TestSuiteHelmTriggerLabel] != release {
 			orig := testSuite.DeepCopy()
+			if testSuite.Labels == nil {
+				testSuite.Labels = make(map[string]string)
+			}
 			testSuite.Labels[TestSuiteHelmTriggerLabel] = release
 			delete(testSuite.Annotations, "TestSuiteLastHelmReleaseAnnotation")
 			logger.Trace("patching helm metadata")
@@ -435,9 +441,9 @@ func (r *TestSuiteReconciler) notRunning(ctx context.Context, testSuite *konfirm
 		if ok {
 			logger.Trace("listing matching helm releases")
 			releases := v1.SecretList{}
-			matchingFields := client.MatchingFields(map[string]string{"type": HelmSecretType})
-			matchingLabels := client.MatchingLabels(map[string]string{"name": release.Name, "status": "deployed"})
-			if err := r.List(ctx, &releases, client.InNamespace(release.Namespace), matchingFields, matchingLabels); err != nil {
+			//matchingFields := client.MatchingFields(map[string]string{"type": HelmSecretType})
+			matchingLabels := client.MatchingLabels(map[string]string{"owner": "Helm", "name": release.Name, "status": "deployed"})
+			if err := r.List(ctx, &releases, client.InNamespace(release.Namespace), matchingLabels); err != nil {
 				logger.Error(err, "error listing Helm release secrets")
 				return ctrl.Result{RequeueAfter: r.ErrRequeueDelay}, nil
 			}
@@ -478,6 +484,9 @@ func (r *TestSuiteReconciler) notRunning(ctx context.Context, testSuite *konfirm
 			Reason:  "Helm",
 			Message: "Test suite was triggered by a Helm release",
 			Patch:   client.MergeFrom(testSuite.DeepCopy()),
+		}
+		if testSuite.Annotations == nil {
+			testSuite.Annotations = make(map[string]string)
 		}
 		testSuite.Annotations[TestSuiteLastHelmReleaseAnnotation] = testSuite.Annotations[currentHelmRelase.VersionString]
 		logger.Trace("annotating last helm release")
@@ -679,6 +688,17 @@ func (r *TestSuiteReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		} else {
 			return nil
 		}
+	}); err != nil {
+		return err
+	}
+
+	// Add an indexer to track Secret types for efficient Helm release listing
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &v1.Secret{}, "field:type", func(rawObj client.Object) []string {
+		secret := rawObj.(*v1.Secret)
+		if st := secret.Type; st != "" {
+			return []string{string(st)}
+		}
+		return nil
 	}); err != nil {
 		return err
 	}

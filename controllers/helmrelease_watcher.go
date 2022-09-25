@@ -108,14 +108,8 @@ func (h *EnqueueForHelmTrigger) handle(obj client.Object, q workqueue.RateLimiti
 	// Enqueue triggered TestSuites in the same namespace
 	logger.Trace("listing subscribed test suites")
 	testSuites := konfirm.TestSuiteList{}
-	selector, _ := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{
-		{
-			Key:      TestSuiteHelmTriggerLabel,
-			Operator: "In",
-			Values:   []string{release.Name, release.String()},
-		},
-	}})
-	if err := h.List(ctx, &testSuites, client.InNamespace(release.Namespace), &client.MatchingLabelsSelector{Selector: selector}); err != nil {
+	releaseLabelMatcher := client.MatchingLabels(map[string]string{TestSuiteHelmTriggerLabel: release.LabelValue()})
+	if err := h.List(ctx, &testSuites, client.InNamespace(release.Namespace), releaseLabelMatcher); err != nil {
 		logger.Error(err, "error listing subscribed test suites")
 		return
 	}
@@ -156,9 +150,8 @@ func (h *EnqueueForHelmTrigger) handle(obj client.Object, q workqueue.RateLimiti
 			defer close(reqs)
 			logger.Trace("listing subscribed tests suites in all other namespaces")
 			namespace, _ := fields.ParseSelector("metadata.namespace!=" + release.Namespace)
-			labels := client.MatchingLabels(map[string]string{TestSuiteHelmTriggerLabel: release.String()})
 			testSuites = konfirm.TestSuiteList{}
-			if err := h.List(ctx, &testSuites, &client.MatchingFieldsSelector{Selector: namespace}, labels); err != nil {
+			if err := h.List(ctx, &testSuites, &client.MatchingFieldsSelector{Selector: namespace}, releaseLabelMatcher); err != nil {
 				logger.Error(err, "error listing subscribed test suites in all other namespaces")
 				return
 			}
@@ -174,11 +167,10 @@ func (h *EnqueueForHelmTrigger) handle(obj client.Object, q workqueue.RateLimiti
 		go func() {
 			defer close(reqs)
 			logger.Trace("listing subscribed tests suites in extra namespaces")
-			labels := client.MatchingLabels(map[string]string{TestSuiteHelmTriggerLabel: release.String()})
 			for i := range policy.Spec.ExportTo {
 				namespace := policy.Spec.ExportTo[i]
 				testSuites = konfirm.TestSuiteList{}
-				if err := h.List(ctx, &testSuites, client.InNamespace(namespace), labels); err != nil {
+				if err := h.List(ctx, &testSuites, client.InNamespace(namespace), releaseLabelMatcher); err != nil {
 					logger.Error(err, "error listing subscribed test suites in extra namespace", "extraNamespace", namespace)
 					return
 				}

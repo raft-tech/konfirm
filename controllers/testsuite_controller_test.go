@@ -326,6 +326,58 @@ var _ = Describe("TestSuite Controller", func() {
 				})
 			})
 		})
+
+		When("a Helm trigger is defined", func() {
+
+			BeforeEach(func() {
+				testSuite.Spec.When.HelmRelease = "a-release"
+			})
+
+			It("a label is added to track the Helm release", func() {
+				Eventually(func() (labels map[string]string, err error) {
+					err = k8sClient.Get(ctx, client.ObjectKeyFromObject(testSuite), testSuite)
+					labels = testSuite.Labels
+					return
+				}).Should(HaveKeyWithValue(controllers.TestSuiteHelmTriggerLabel, testSuite.Namespace+"."+testSuite.Spec.When.HelmRelease))
+			})
+
+			When("the Helm release exists", func() {
+
+				var helmSecret *v1.Secret
+
+				BeforeEach(func() {
+					helmSecret = &v1.Secret{
+						ObjectMeta: metav1.ObjectMeta{
+							Namespace: namespace,
+							Name:      "sh.helm.release.v1." + testSuite.Spec.When.HelmRelease + ".v1",
+							Labels: map[string]string{
+								"modifiedAt": fmt.Sprintf("%d", time.Now().Unix()),
+								"name":       testSuite.Spec.When.HelmRelease,
+								"owner":      "Helm",
+								"status":     "deployed",
+								"version":    "1",
+							},
+						},
+						Type: controllers.HelmSecretType,
+					}
+					Expect(k8sClient.Create(ctx, helmSecret)).NotTo(HaveOccurred())
+				})
+
+				It("it should progress to running", func() {
+					Eventually(func(g Gomega) {
+						g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(testSuite), testSuite)).NotTo(HaveOccurred())
+						g.Expect(testSuite.Status.Phase).To(Equal(konfirm.TestSuiteRunning))
+						g.Expect(testSuite.Annotations[controllers.TestSuiteLastHelmReleaseAnnotation]).To(Equal(helmSecret.Labels["version"]))
+						g.Expect(testSuite.Status.Conditions).To(HaveKey(And(
+							HaveField("Type", controllers.TestSuiteRunStartedCondition),
+							HaveField("Status", metav1.ConditionTrue),
+							HaveField("Reason", "HelmRelease"),
+							HaveField("Message", "TestSuite was manually triggered"),
+						)))
+					})
+				})
+			})
+		})
 	})
 
 	Context("a test suite exists", func() {
@@ -338,7 +390,7 @@ var _ = Describe("TestSuite Controller", func() {
 			}, timeout).Should(Equal(konfirm.TestSuiteReady))
 		})
 
-		When("and it is triggered", func() {
+		When("and it is manually triggered", func() {
 
 			JustBeforeEach(func() {
 				orig := testSuite.DeepCopy()
@@ -356,6 +408,195 @@ var _ = Describe("TestSuite Controller", func() {
 						HaveField("Reason", "Manual"),
 						HaveField("Message", "TestSuite was manually triggered"),
 					)))
+				})
+			})
+		})
+
+		Context("with a Helm trigger", func() {
+
+			var helmSecret *v1.Secret
+
+			BeforeEach(func() {
+				helmSecret = &v1.Secret{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: namespace,
+						Name:      "sh.helm.release.v1.my-chart.v1",
+						Labels: map[string]string{
+							"modifiedAt": fmt.Sprintf("%d", time.Now().Unix()),
+							"name":       "my-chart",
+							"owner":      "Helm",
+							"status":     "deployed",
+							"version":    "1",
+						},
+					},
+					Type: controllers.HelmSecretType,
+				}
+				testSuite.Spec.When.HelmRelease = helmSecret.Labels["name"]
+			})
+
+			When("a Helm release occurs", func() {
+
+				JustBeforeEach(func() {
+					Eventually(func() (phase konfirm.TestSuitePhase, err error) {
+						err = k8sClient.Get(ctx, client.ObjectKeyFromObject(testSuite), testSuite)
+						phase = testSuite.Status.Phase
+						return
+					}, timeout).Should(Equal(konfirm.TestSuiteReady))
+					Expect(k8sClient.Create(ctx, helmSecret)).NotTo(HaveOccurred())
+				})
+
+				It("it should trigger a run", func() {
+					Eventually(func(g Gomega) {
+						g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(testSuite), testSuite)).NotTo(HaveOccurred())
+						g.Expect(testSuite.Status.Phase).To(Equal(konfirm.TestSuiteRunning))
+						g.Expect(testSuite.Annotations[controllers.TestSuiteLastHelmReleaseAnnotation]).To(Equal(helmSecret.Labels["version"]))
+						g.Expect(testSuite.Status.Conditions).To(HaveKey(And(
+							HaveField("Type", controllers.TestSuiteRunStartedCondition),
+							HaveField("Status", metav1.ConditionTrue),
+							HaveField("Reason", "HelmRelease"),
+							HaveField("Message", "TestSuite was manually triggered"),
+						)))
+					})
+				})
+			})
+
+			Context("the Helm release is in a different namespace", func() {
+
+				var helmReleaseNamespace *v1.Namespace
+
+				BeforeEach(func() {
+					helmReleaseNamespace = &v1.Namespace{}
+					Expect(func() (err error) {
+						helmReleaseNamespace.Name, err = generateNamespace()
+						return
+					}()).NotTo(HaveOccurred())
+					Expect(k8sClient.Create(ctx, helmReleaseNamespace)).NotTo(HaveOccurred())
+					helmSecret.Namespace = helmReleaseNamespace.Name
+					testSuite.Spec.When.HelmRelease = helmReleaseNamespace.Name + "." + testSuite.Spec.When.HelmRelease
+				})
+
+				AfterEach(func() {
+					Expect(k8sClient.Delete(ctx, helmSecret)).NotTo(HaveOccurred())
+					Expect(k8sClient.Delete(ctx, helmReleaseNamespace)).NotTo(HaveOccurred())
+				})
+
+				When("a Helm release occurs", func() {
+
+					JustBeforeEach(func() {
+						Eventually(func() (phase konfirm.TestSuitePhase, err error) {
+							err = k8sClient.Get(ctx, client.ObjectKeyFromObject(testSuite), testSuite)
+							phase = testSuite.Status.Phase
+							return
+						}, timeout).Should(Equal(konfirm.TestSuiteReady))
+						Expect(k8sClient.Create(ctx, helmSecret)).NotTo(HaveOccurred())
+					})
+
+					It("it should NOT trigger a run", func() {
+						Consistently(func(g Gomega) {
+							g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(testSuite), testSuite)).NotTo(HaveOccurred())
+							g.Expect(testSuite.Status.Phase).NotTo(Equal(konfirm.TestSuiteRunning))
+							g.Expect(testSuite.Annotations[controllers.TestSuiteLastHelmReleaseAnnotation]).NotTo(Equal(helmSecret.Labels["version"]))
+							g.Expect(testSuite.Status.Conditions).NotTo(HaveKey(And(
+								HaveField("Type", controllers.TestSuiteRunStartedCondition),
+								HaveField("Status", metav1.ConditionTrue),
+								HaveField("Reason", "HelmRelease"),
+								HaveField("Message", "TestSuite was manually triggered"),
+							)))
+						})
+					})
+				})
+
+				Context("a HelmPolicy exists", func() {
+
+					var helmPolicy *konfirm.HelmPolicy
+
+					BeforeEach(func() {
+						helmPolicy = &konfirm.HelmPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Namespace: helmReleaseNamespace.Name,
+								Name:      helmSecret.Labels["name"],
+							},
+							Spec: konfirm.HelmPolicySpec{
+								ExportTo: []string{"some-namespace"},
+							},
+						}
+					})
+
+					JustBeforeEach(func() {
+						Expect(k8sClient.Create(ctx, helmPolicy)).NotTo(HaveOccurred())
+					})
+
+					AfterEach(func() {
+						Expect(k8sClient.Delete(ctx, helmPolicy)).NotTo(HaveOccurred())
+					})
+
+					When("a Helm release occurs", func() {
+
+						JustBeforeEach(func() {
+							Eventually(func() (phase konfirm.TestSuitePhase, err error) {
+								err = k8sClient.Get(ctx, client.ObjectKeyFromObject(testSuite), testSuite)
+								phase = testSuite.Status.Phase
+								return
+							}, timeout).Should(Equal(konfirm.TestSuiteReady))
+							Expect(k8sClient.Create(ctx, helmSecret)).NotTo(HaveOccurred())
+						})
+
+						It("it should NOT trigger a run", func() {
+							Consistently(func(g Gomega) {
+								g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(testSuite), testSuite)).NotTo(HaveOccurred())
+								g.Expect(testSuite.Status.Phase).NotTo(Equal(konfirm.TestSuiteRunning))
+								g.Expect(testSuite.Annotations[controllers.TestSuiteLastHelmReleaseAnnotation]).NotTo(Equal(helmSecret.Labels["version"]))
+								g.Expect(testSuite.Status.Conditions).NotTo(HaveKey(And(
+									HaveField("Type", controllers.TestSuiteRunStartedCondition),
+									HaveField("Status", metav1.ConditionTrue),
+									HaveField("Reason", "HelmRelease"),
+									HaveField("Message", "TestSuite was manually triggered"),
+								)))
+							})
+						})
+
+						When("the HelmPolicy exports to all namespaces", func() {
+
+							BeforeEach(func() {
+								helmPolicy.Spec.ExportTo = []string{"*"}
+							})
+
+							It("it should trigger a run", func() {
+								Eventually(func(g Gomega) {
+									g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(testSuite), testSuite)).NotTo(HaveOccurred())
+									g.Expect(testSuite.Status.Phase).To(Equal(konfirm.TestSuiteRunning))
+									g.Expect(testSuite.Annotations[controllers.TestSuiteLastHelmReleaseAnnotation]).To(Equal(helmSecret.Labels["version"]))
+									g.Expect(testSuite.Status.Conditions).To(HaveKey(And(
+										HaveField("Type", controllers.TestSuiteRunStartedCondition),
+										HaveField("Status", metav1.ConditionTrue),
+										HaveField("Reason", "HelmRelease"),
+										HaveField("Message", "TestSuite was manually triggered"),
+									)))
+								})
+							})
+						})
+
+						When("the HelmPolicy exports to TestSuite's namespace", func() {
+
+							BeforeEach(func() {
+								helmPolicy.Spec.ExportTo = append(helmPolicy.Spec.ExportTo, testSuite.Namespace)
+							})
+
+							It("it should trigger a run", func() {
+								Eventually(func(g Gomega) {
+									g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(testSuite), testSuite)).NotTo(HaveOccurred())
+									g.Expect(testSuite.Status.Phase).To(Equal(konfirm.TestSuiteRunning))
+									g.Expect(testSuite.Annotations[controllers.TestSuiteLastHelmReleaseAnnotation]).To(Equal(helmSecret.Labels["version"]))
+									g.Expect(testSuite.Status.Conditions).To(HaveKey(And(
+										HaveField("Type", controllers.TestSuiteRunStartedCondition),
+										HaveField("Status", metav1.ConditionTrue),
+										HaveField("Reason", "HelmRelease"),
+										HaveField("Message", "TestSuite was manually triggered"),
+									)))
+								})
+							})
+						})
+					})
 				})
 			})
 		})

@@ -155,6 +155,17 @@ type HelmReleaseMeta struct {
 	Status        string
 }
 
+func (hrm *HelmReleaseMeta) LabelValue() string {
+	if hrm == nil {
+		return ""
+	}
+	val := hrm.Name
+	if hrm.Namespace != "" {
+		val += "." + hrm.Namespace
+	}
+	return val
+}
+
 // ParseHelmReleaseSecret generates HelmReleaseMeta based on the
 // provided v1.Secret. If the provided Secret does not appear to be a valid Helm
 // release, the return boolean will be false; otherwise it will be true.
