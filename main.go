@@ -18,10 +18,11 @@ package main
 
 import (
 	"flag"
-	"github.com/robfig/cron/v3"
-	"k8s.io/utils/clock"
 	"os"
 	"time"
+
+	"github.com/robfig/cron/v3"
+	"k8s.io/utils/clock"
 
 	"github.com/raft-tech/konfirm/logging"
 

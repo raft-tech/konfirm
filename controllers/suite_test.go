@@ -22,6 +22,7 @@ import (
 	. "github.com/onsi/ginkgo"
 	"github.com/onsi/ginkgo/config"
 	. "github.com/onsi/gomega"
+	konfirmv1alpha1 "github.com/raft-tech/konfirm/api/v1alpha1"
 	"github.com/raft-tech/konfirm/controllers"
 	"github.com/raft-tech/konfirm/logging"
 	"github.com/robfig/cron/v3"
@@ -41,8 +42,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"strings"
 	"testing"
-
-	konfirmv1alpha1 "github.com/raft-tech/konfirm/api/v1alpha1"
 	//+kubebuilder:scaffold:imports
 )
 

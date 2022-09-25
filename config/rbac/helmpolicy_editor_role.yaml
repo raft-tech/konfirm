@@ -1,0 +1,24 @@
+# permissions for end users to edit helmpolicies.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: helmpolicy-editor-role
+rules:
+- apiGroups:
+  - konfirm.goraft.tech
+  resources:
+  - helmpolicies
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - konfirm.goraft.tech
+  resources:
+  - helmpolicies/status
+  verbs:
+  - get
