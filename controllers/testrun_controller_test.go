@@ -28,7 +28,7 @@ import (
 
 var _ = Describe("TestRun Controller", func() {
 
-	const timeout = "100ms"
+	const timeout = "500ms"
 
 	var ctx context.Context
 	var namespace string

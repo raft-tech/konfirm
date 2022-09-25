@@ -34,7 +34,7 @@ import (
 var _ = Describe("On Test Controller reconciliation", func() {
 
 	const (
-		timeout = "100ms"
+		timeout = "500ms"
 	)
 
 	var (
@@ -547,7 +547,7 @@ var _ = Describe("On Test Controller reconciliation", func() {
 				It("creates a new pod", func() {
 					Eventually(func() ([]v1.Pod, error) {
 						return getPods(ctx, test)
-					}).Should(ContainElement(HaveField("UID", Not(Equal(pod.UID)))))
+					}, timeout).Should(ContainElement(HaveField("UID", Not(Equal(pod.UID)))))
 				})
 			})
 
