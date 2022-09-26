@@ -73,8 +73,10 @@ type TestReconciler struct {
 
 //+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=tests,verbs=get;list;watch
 //+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=tests/status,verbs=get;patch
+//+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=tests/finalizers,verbs=update;patch
 //+kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=pods/status,verbs=get
+//+kubebuilder:rbac:groups="",resources=pods/finalizers,verbs=update;patch
 //+kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to

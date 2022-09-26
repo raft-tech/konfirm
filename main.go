@@ -55,38 +55,55 @@ func init() {
 }
 
 func main() {
-	var metricsAddr string
-	var enableLeaderElection bool
-	var probeAddr string
-	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
-	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
-	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
-		"Enable leader election for controller manager. "+
-			"Enabling this will ensure there is only one active controller manager.")
+
+	var err error
+
+	// Logging flags
 	opts := zap.Options{
 		EncoderConfigOptions: []zap.EncoderConfigOption{
 			logging.EncoderLevelConfig(logging.LowercaseLevelEncoder),
 		},
 	}
-
 	opts.BindFlags(flag.CommandLine)
-	flag.Parse()
 
+	// Manager flags
+	options := ctrl.Options{
+		Scheme: scheme,
+	}
+	flag.StringVar(&options.MetricsBindAddress, "listen-metrics", "",
+		"The address the metric endpoint binds to.")
+	flag.StringVar(&options.HealthProbeBindAddress, "listen-healthz", "",
+		"The address the health-probe endpoint binds to.")
+	flag.BoolVar(&options.LeaderElection, "leader-elect", false,
+		"Enable leader election for controller manager. Enabling this will "+
+			"ensure there is only one active controller manager.")
+
+	// Config file
+	var configFile string
+	flag.StringVar(&configFile, "config", "",
+		"The controller will load its initial configuration from this file. "+
+			"Omit this flag to use the default configuration values. Command-line "+
+			"flags override configuration from this file.")
+
+	// Parse flags
+	flag.Parse()
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
-		Scheme:                 scheme,
-		MetricsBindAddress:     metricsAddr,
-		Port:                   9443,
-		HealthProbeBindAddress: probeAddr,
-		LeaderElection:         enableLeaderElection,
-		LeaderElectionID:       "1337e21f.goraft.tech",
-	})
+	// Load config file if set
+	if configFile != "" {
+		options, err = options.AndFrom(ctrl.ConfigFile().AtPath(configFile))
+		if err != nil {
+			setupLog.Error(err, "unable to load the config file")
+			os.Exit(1)
+		}
+	}
+
+	// Create the manager
+	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), options)
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
 	}
-
 	recorder := mgr.GetEventRecorderFor("konfirm")
 	if err = (&controllers.TestReconciler{
 		Client:          mgr.GetClient(),
@@ -119,17 +136,17 @@ func main() {
 	}
 	//+kubebuilder:scaffold:builder
 
-	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
+	if err = mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")
 		os.Exit(1)
 	}
-	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
+	if err = mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up ready check")
 		os.Exit(1)
 	}
 
 	setupLog.Info("starting manager")
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+	if err = mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}

@@ -81,11 +81,15 @@ docker-build: generate fmt vet ## Build docker image with the manager.
 
 .PHONY: docker-build-mock
 docker-build-mock: ## Build docker image with the mock
-	docker build -t ${MOCK_IMG} -f ./images/mock.dockerfile .
-
+	docker build -t ${MOCK_IMG} -f ./images/mock.dockerfile
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
 	docker push ${IMG}
+
+.PHONY: charts
+charts: charts/konfirm-base/templates/crds.yaml
+charts/konfirm-base/templates/crds.yaml: $(KUSTOMIZE) config/crd config/crd/*.yaml config/crd/bases/*.yaml config/crd/patches/*.yaml
+	$(KUSTOMIZE) build config/crd -o charts/konfirm-base/templates/crds.yaml
 
 ##@ Kind
 

@@ -1,0 +1,30 @@
+
+serviceAccount:
+  create: true
+#  name: konfirm
+
+manager:
+
+  leaderElect: true
+
+  # Defaults to release namespace
+#  namespace: ""
+
+security:
+
+  # If true, operator will have cluster-scoped permissions. Defaults to
+  # namespaced scope.
+  clusterOperator: false
+
+  permissions:
+
+    # Helm triggers require permissions to watch all Secrets, so the default value
+    # is false. To enable Helm triggers, set this value to true.
+    allowHelmTriggers: false
+
+    createManagerRoles: true
+    createUserRoles: true
+#     managerRoleName: konfirm-leader-role
+#     managerClusterRoleName: konfirm-manager-role
+#     editorClusterRoleName: konfirm-editor-role
+#     viewerClusterRoleName: konfirm-viewer-role

@@ -1,0 +1,322 @@
+{{- if .Values.security.permissions.createManagerRoles }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "konfirm.leaderElectRoleName" . }}
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "konfirm.managerClusterRoleName" . }}
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - pods/finalizers
+    verbs:
+      - patch
+      - update
+  - apiGroups:
+      - ""
+    resources:
+      - pods/status
+    verbs:
+      - get
+{{- if .Values.security.permissions.allowHelmTriggers }}
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    verbs:
+      - get
+      - list
+      - watch
+{{- end }}
+  - apiGroups:
+      - konfirm.goraft.tech
+    resources:
+      - helmpolicies
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - konfirm.goraft.tech
+    resources:
+      - testruns
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - konfirm.goraft.tech
+    resources:
+      - testruns/finalizers
+    verbs:
+      - patch
+      - update
+  - apiGroups:
+      - konfirm.goraft.tech
+    resources:
+      - testruns/status
+    verbs:
+      - get
+      - patch
+      - update
+  - apiGroups:
+      - konfirm.goraft.tech
+    resources:
+      - tests
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - konfirm.goraft.tech
+    resources:
+      - tests/finalizers
+    verbs:
+      - patch
+      - update
+  - apiGroups:
+      - konfirm.goraft.tech
+    resources:
+      - tests/status
+    verbs:
+      - get
+      - patch
+  - apiGroups:
+      - konfirm.goraft.tech
+    resources:
+      - testsuites
+    verbs:
+      - get
+      - list
+      - patch
+      - watch
+  - apiGroups:
+      - konfirm.goraft.tech
+    resources:
+      - testsuites/finalizers
+    verbs:
+      - patch
+      - update
+  - apiGroups:
+      - konfirm.goraft.tech
+    resources:
+      - testsuites/status
+    verbs:
+      - get
+      - patch
+  - apiGroups:
+      - konfirm.goraft.tech
+    resources:
+      - testsuites/trigger
+    verbs:
+      - get
+      - patch
+      - update
+---
+{{- end }}
+{{- if .Values.security.permissions.createUserRoles }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "konfirm.editorClusterRoleName" . }}
+rules:
+  - apiGroups:
+      - konfirm.goraft.tech
+    resources:
+      - helmpolicies
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - konfirm.goraft.tech
+    resources:
+      - testruns
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - konfirm.goraft.tech
+    resources:
+      - testruns/status
+    verbs:
+      - get
+  - apiGroups:
+      - konfirm.goraft.tech
+    resources:
+      - tests
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - konfirm.goraft.tech
+    resources:
+      - tests/status
+    verbs:
+      - get
+  - apiGroups:
+      - konfirm.goraft.tech
+    resources:
+      - testsuites
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - konfirm.goraft.tech
+    resources:
+      - testsuites/status
+    verbs:
+      - get
+  - apiGroups:
+      - konfirm.goraft.tech
+    resources:
+      - testsuites/trigger
+    verbs:
+      - get
+      - patch
+      - update
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "konfirm.viewerClusterRoleName" . }}
+rules:
+  - apiGroups:
+      - konfirm.goraft.tech
+    resources:
+      - helmpolicies
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - konfirm.goraft.tech
+    resources:
+      - testruns
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - konfirm.goraft.tech
+    resources:
+      - testruns/status
+    verbs:
+      - get
+  - apiGroups:
+      - konfirm.goraft.tech
+    resources:
+      - tests
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - konfirm.goraft.tech
+    resources:
+      - tests/status
+    verbs:
+      - get
+  - apiGroups:
+      - konfirm.goraft.tech
+    resources:
+      - testsuites
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - konfirm.goraft.tech
+    resources:
+      - testsuites/status
+    verbs:
+      - get
+  - apiGroups:
+      - konfirm.goraft.tech
+    resources:
+      - testsuites/trigger
+    verbs:
+      - get
+{{- end }}

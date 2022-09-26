@@ -97,8 +97,11 @@ type testSuiteTrigger struct {
 }
 
 //+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=testsuites,verbs=get;list;watch;patch
-//+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=testsuites/trigger;testsuites/status,verbs=get;patch
+//+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=testsuites/trigger,verbs=get;update;patch
+//+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=testsuites/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=testsuites/finalizers,verbs=update;patch
 //+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=testruns,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=testruns/finalizers,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
