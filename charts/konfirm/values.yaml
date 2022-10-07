@@ -1,14 +1,41 @@
 
+fullnameOverride: ""
+
+image:
+  hub: ""
+
 serviceAccount:
+
+  # If false, the service account must be created by another mechanism.
   create: true
-#  name: konfirm
 
 manager:
 
-  leaderElect: true
+  ##
+  tag: ""
 
-  # Defaults to release namespace
-#  namespace: ""
+  # If false, leader-election will be disabled and replicas should be
+  # set to 1 to avoid
+  enableLeaderElection: true
+
+  # When security.clusterOperator is set to true, ignoredNamespaces defines
+  # namespaces the Konfirm operator will explicitly ignore.
+  ignoredNamespaces: []
+
+  # When security.clusterOperator is set to true, watchedNamespaces restricts
+  # the namespaces the Konfirm operator will watch.
+  watchedNamespaces: []
+
+  # The number of replicas to run, defaults to 2 for high-availability
+  replicas: 2
+
+  resources:
+    limits:
+      cpu: 500m
+      memory: 128Mi
+    requests:
+      cpu: 10m
+      memory: 64Mi
 
 security:
 
@@ -16,15 +43,20 @@ security:
   # namespaced scope.
   clusterOperator: false
 
+  # If false, manager RBAC roles will not be created
+  createManagerRoles: true
+
+  # If false, user RBAC roles will not be created
+  createUserRoles: true
+
   permissions:
 
-    # Helm triggers require permissions to watch all Secrets, so the default value
-    # is false. To enable Helm triggers, set this value to true.
+    # Helm triggers require permissions to watch all Secrets, so the default
+    # value is false. To enable Helm triggers, set this value to true.
     allowHelmTriggers: false
 
-    createManagerRoles: true
-    createUserRoles: true
-#     managerRoleName: konfirm-leader-role
-#     managerClusterRoleName: konfirm-manager-role
-#     editorClusterRoleName: konfirm-editor-role
-#     viewerClusterRoleName: konfirm-viewer-role
+    # Helm installs from private Helm registries require permissions to get
+    # Secrets, so the default value is false. To allow installing Helm charts
+    # from private registries, set this value to true. Alternatively, per-
+    # secret RBAC permissions can be defined by alternative means.
+    allowPrivateHelmRegistries: false

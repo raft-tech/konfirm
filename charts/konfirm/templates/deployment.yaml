@@ -1,51 +1,30 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: {{ include "konfirm.managerConfigMapName"  . }}
-data:
-  controller_manager_config.yaml: |
-    apiVersion: controller-runtime.sigs.k8s.io/v1alpha1
-    kind: ControllerManagerConfig
-    health:
-      healthProbeBindAddress: :8081
-    metrics:
-      bindAddress: 127.0.0.1:8080
-    webhook:
-      port: 9443
-    leaderElection:
-      leaderElect: true
-      resourceName: {{ include "konfirm.fullname" . }}.konfirm.goraft.tech
-    {{- if not .Values.security.clusterOperator }}
-    cacheNamespace: {{ include "konfirm.managedNamespace"  . }}
-    {{- end }}
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{  include "konfirm.fullname" . | trunc 55 | trimSuffix "-"  }}-manager
   labels:
     control-plane: controller-manager
-    {{ include "konfirm.labels" . | nindent 4 }}
+    {{- include "konfirm.labels" . | nindent 4 }}
 spec:
-  replicas: 1
+  replicas: {{ .Values.manager.replicas }}
   selector:
     matchLabels:
       control-plane: controller-manager
-      {{ include "konfirm.selectorLabels" . | nindent 6 }}
+      {{- include "konfirm.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       annotations:
         kubectl.kubernetes.io/default-container: manager
       labels:
         control-plane: controller-manager
-        {{ include "konfirm.selectorLabels" . | nindent 8 }}
+        {{- include "konfirm.selectorLabels" . | nindent 8 }}
     spec:
       containers:
       - args:
         - --config=/config/controller_manager_config.yaml
         command:
         - /manager
-        image: konfirm/controller:v0.1.0
+        image: {{ .Values.image.hub }}konfirm/controller:{{ default .Chart.AppVersion .Values.manager.tag }}
         name: manager
         ports:
         - containerPort: 8080
@@ -63,12 +42,7 @@ spec:
           initialDelaySeconds: 5
           periodSeconds: 10
         resources:
-          limits:
-            cpu: 500m
-            memory: 128Mi
-          requests:
-            cpu: 10m
-            memory: 64Mi
+          {{- toYaml .Values.manager.resources |nindent 10 }}
         securityContext:
           allowPrivilegeEscalation: false
         volumeMounts:
@@ -82,3 +56,40 @@ spec:
         - name: manager-config
           configMap:
             name: {{ include "konfirm.managerConfigMapName" . }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "konfirm.managerConfigMapName"  . }}
+  namespace: {{ .Release.Namespace }}
+data:
+  controller_manager_config.yaml: |
+    apiVersion: controller-runtime.sigs.k8s.io/v1alpha1
+    kind: ControllerManagerConfig
+    health:
+      healthProbeBindAddress: :8081
+    {{- if not .Values.security.clusterOperator }}
+    cacheNamespace: {{ include "konfirm.managedNamespace"  . }}
+    {{- end }}
+    leaderElection:
+      {{- if .Values.manager.enableLeaderElection }}
+      leaderElect: true
+      {{- end }}
+      resourceName: {{ printf "%s-%s" (include "konfirm.fullname" .) ".goraft.tech" | trunc 63 }}
+    metrics:
+      bindAddress: 127.0.0.1:8080
+    webhook:
+      port: 9443
+    {{- if not (empty .Values.manager.ignoredNamespaces )}}
+    ignoredNamespaces:
+    {{- range .Values.manager.ignoredNamespaces }}
+      - {{ . | quote }}
+    {{- end }}
+    {{- end }}
+    {{- if not (empty .Values.manager.watchedNamespaces )}}
+    watchedNamespaces:
+    {{- range .Values.manager.watchedNamespaces }}
+      - {{ . | quote }}
+    {{- end }}
+    {{- end }}
+---

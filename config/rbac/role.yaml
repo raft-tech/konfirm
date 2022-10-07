@@ -40,6 +40,12 @@ rules:
 - apiGroups:
   - konfirm.goraft.tech
   resources:
+  - helmpolicies
+  verbs:
+  - get
+- apiGroups:
+  - konfirm.goraft.tech
+  resources:
   - testruns
   verbs:
   - create

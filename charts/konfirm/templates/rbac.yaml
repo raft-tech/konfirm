@@ -1,38 +1,8 @@
-{{- if .Values.security.permissions.createManagerRoles }}
+{{- if .Values.security.createManagerRoles }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: {{ include "konfirm.leaderElectRoleName" . }}
-rules:
-  - apiGroups:
-      - ""
-    resources:
-      - configmaps
-    verbs:
-      - get
-      - list
-      - watch
-      - create
-      - update
-      - patch
-      - delete
-  - apiGroups:
-      - coordination.k8s.io
-    resources:
-      - leases
-    verbs:
-      - get
-      - list
-      - watch
-      - create
-      - update
-      - patch
-      - delete
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: {{ include "konfirm.managerClusterRoleName" . }}
+  name: {{ include "konfirm.leaderRoleName" . }}
 rules:
   - apiGroups:
       - ""
@@ -73,6 +43,12 @@ rules:
       - pods/status
     verbs:
       - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "konfirm.managerClusterRoleName" . }}
+rules:
 {{- if .Values.security.permissions.allowHelmTriggers }}
   - apiGroups:
       - ""
@@ -82,6 +58,39 @@ rules:
       - get
       - list
       - watch
+{{- else if .Values.security.permissions.allowPrivateHelmRegistries }}
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    verbs:
+      - get
+{{- end }}
+{{- if .Values.manager.enableLeaderElection }}
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
 {{- end }}
   - apiGroups:
       - konfirm.goraft.tech
@@ -175,9 +184,9 @@ rules:
       - get
       - patch
       - update
----
 {{- end }}
 {{- if .Values.security.permissions.createUserRoles }}
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:

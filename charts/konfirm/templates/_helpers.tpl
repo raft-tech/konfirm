@@ -62,7 +62,7 @@ Create the name of the service account to use
 */}}
 {{- define "konfirm.serviceAccountName" -}}
 {{- if .Values.serviceAccount.create }}
-{{- default (include "konfirm.fullname" .) .Values.serviceAccount.name }}
+{{- printf "%s-%s" (include "konfirm.fullname" .) "controller" }}
 {{- else }}
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
@@ -81,49 +81,33 @@ Create the name of the manager config map
 {{- end }}
 
 {{/*
-Create the name of the leader-elect role
+Create the name of the leader role
 */}}
-{{- define "konfirm.leaderElectRoleName" -}}
-{{- $name := default (printf "%s-%s" (include "konfirm.fullname" .) "leader-role") .Values.security.leaderElectRoleName }}
-{{- if contains .Release.Name $name }}
+{{- define "konfirm.leaderRoleName" -}}
+{{- $name := printf "%s-%s" (include "konfirm.fullname" .) "leader-role" }}
 {{- $name | trunc 63 | trimSuffix "-" }}
-{{- else }}
-{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" }}
-{{- end }}
 {{- end }}
 
 {{/*
 Create the name of the manager cluster role
 */}}
 {{- define "konfirm.managerClusterRoleName" -}}
-{{- $name := default (printf "%s-%s" (include "konfirm.fullname" .) "manager-role") .Values.security.managerClusterRoleName }}
-{{- if contains .Release.Name $name }}
+{{- $name := printf "%s-%s" (include "konfirm.fullname" .) "manager-role" }}
 {{- $name | trunc 63 | trimSuffix "-" }}
-{{- else }}
-{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" }}
-{{- end }}
 {{- end }}
 
 {{/*
 Create the name of the editor cluster role
 */}}
 {{- define "konfirm.editorClusterRoleName" -}}
-{{- $name := default (printf "%s-%s" (include "konfirm.fullname" .) "editor-role") .Values.security.editorClusterRoleName }}
-{{- if contains .Release.Name $name }}
+{{- $name := printf "%s-%s" (include "konfirm.fullname" .) "editor-role" }}
 {{- $name | trunc 63 | trimSuffix "-" }}
-{{- else }}
-{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" }}
-{{- end }}
 {{- end }}
 
 {{/*
 Create the name of the viewer cluster role
 */}}
 {{- define "konfirm.viewerClusterRoleName" -}}
-{{- $name := default (printf "%s-%s" (include "konfirm.fullname" .) "viewer-role") .Values.security.viewerClusterRoleName }}
-{{- if contains .Release.Name $name }}
+{{- $name := printf "%s-%s" (include "konfirm.fullname" .) "viewer-role" }}
 {{- $name | trunc 63 | trimSuffix "-" }}
-{{- else }}
-{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" }}
-{{- end }}
 {{- end }}
