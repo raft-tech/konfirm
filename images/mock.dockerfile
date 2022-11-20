@@ -14,7 +14,7 @@ COPY cmd/mock cmd/mock
 
 # Build
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o mock ./cmd/mock
-FROM scratch
+FROM gcr.io/distroless/static-debian11:nonroot
 COPY --from=builder /workspace/mock /mock
 ENTRYPOINT ["/mock"]
 CMD ["pass"]

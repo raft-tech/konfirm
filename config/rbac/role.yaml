@@ -17,12 +17,8 @@ rules:
   resources:
   - pods
   verbs:
-  - create
-  - delete
   - get
   - list
-  - patch
-  - update
   - watch
 - apiGroups:
   - ""
@@ -85,3 +81,9 @@ rules:
   verbs:
   - get
   - patch
+- apiGroups:
+  - konfirm.goraft.tech
+  resources:
+  - userrefs
+  verbs:
+  - get

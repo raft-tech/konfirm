@@ -1,0 +1,12 @@
+apiVersion: konfirm.goraft.tech/v1alpha1
+kind: UserRef
+metadata:
+  labels:
+    app.kubernetes.io/name: userref
+    app.kubernetes.io/instance: userref-sample
+    app.kubernetes.io/part-of: konfirm
+    app.kuberentes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: konfirm
+  name: userref-sample
+spec:
+  # TODO(user): Add fields here

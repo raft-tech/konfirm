@@ -51,6 +51,9 @@ type TestSpec struct {
 	// RetentionPolicy specifies how generated resources should be handled after the Test finishes.
 	RetentionPolicy RetainPolicy `json:"retentionPolicy,omitempty"`
 
+	// RunAs is the name of the UserRef the pod will be managed by
+	RunAs string `json:"runAs,omitempty"`
+
 	// Template is the PodSpecTemplate that will be used to run the test
 	Template v1.PodTemplateSpec `json:"template"`
 }

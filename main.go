@@ -39,6 +39,7 @@ import (
 
 	konfirmv1alpha1 "github.com/raft-tech/konfirm/api/v1alpha1"
 	"github.com/raft-tech/konfirm/controllers"
+	"github.com/raft-tech/konfirm/internal/impersonate"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -74,6 +75,8 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
+	// TODO: Set impersonate.DefaultUserRef.Namespace to controller namespace
+
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
 		MetricsBindAddress:     metricsAddr,
@@ -81,6 +84,7 @@ func main() {
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "1337e21f.goraft.tech",
+		NewClient:              impersonate.NewImpersonatingClient,
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
@@ -89,7 +93,7 @@ func main() {
 
 	recorder := mgr.GetEventRecorderFor("konfirm")
 	if err = (&controllers.TestReconciler{
-		Client:          mgr.GetClient(),
+		Client:          mgr.GetClient().(impersonate.Client),
 		Scheme:          mgr.GetScheme(),
 		Recorder:        recorder,
 		ErrRequeueDelay: time.Minute,
@@ -107,7 +111,7 @@ func main() {
 		os.Exit(1)
 	}
 	if err = (&controllers.TestSuiteReconciler{
-		Client:          mgr.GetClient(),
+		Client:          mgr.GetClient().(impersonate.Client),
 		Scheme:          mgr.GetScheme(),
 		Recorder:        recorder,
 		ErrRequeueDelay: time.Minute,
