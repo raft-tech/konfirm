@@ -41,6 +41,9 @@ type TestRunSpec struct {
 	// +kubebuilder:default=OnFailure
 	RetentionPolicy RetainPolicy `json:"retentionPolicy,omitempty"`
 
+	// RunAs is the name of the UserRef the resulting pods will be managed by
+	RunAs string `json:"runAs,omitempty"`
+
 	// +kubebuilder:validation:MinItems=1
 	Tests []TestTemplate `json:"tests"`
 }

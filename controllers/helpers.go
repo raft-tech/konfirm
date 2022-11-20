@@ -26,8 +26,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/rand"
+	"math"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"strconv"
+	"strings"
+	"time"
 )
 
 const (
@@ -198,5 +201,33 @@ func ParseHelmReleaseSecret(secret *v1.Secret) (release *HelmReleaseMeta, ok boo
 		return
 	}
 
+	return
+}
+
+// MakeNamespacedName parses the provided string to generate
+// a types.NamespacedName. If a namespace is not explicitly defined, the
+// Namespace on the returned object will be empty.
+func MakeNamespacedName(str string) (n types.NamespacedName) {
+	if pos := strings.Index(str, string(types.Separator)); pos != -1 && pos+1 < len(str) {
+		n.Namespace = str[:pos]
+		n.Name = str[pos+1:]
+	} else {
+		n.Name = str
+	}
+	return
+}
+
+// GetBackOff calculates the next backoff duration given the time since
+// backoff started. The backoff rate is exponential, starting at 5 seconds and
+// leveling at 5 minutes.
+func GetBackOff(since time.Duration) (b time.Duration) {
+	if s := since.Seconds(); s < 5.0 {
+		b = 5.0 * time.Second
+	} else if s < 160.0 {
+		i := math.Floor(math.Log2(s/5.0) + 1)                 // How many backoff iterations have occurred
+		b = time.Duration(math.Pow(2.0, i)*5.0) * time.Second // Calculate next backoff period
+	} else {
+		b = 5.0 * time.Minute
+	}
 	return
 }

@@ -27,6 +27,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	konfirm "github.com/raft-tech/konfirm/api/v1alpha1"
+	"github.com/raft-tech/konfirm/internal/impersonate"
 	"github.com/raft-tech/konfirm/logging"
 	"github.com/robfig/cron/v3"
 	v1 "k8s.io/api/core/v1"
@@ -49,6 +50,7 @@ const (
 	TestSuiteLastHelmReleaseAnnotation = konfirm.GroupName + "/last-helm-release"
 	TestSuiteHelmTriggerLabel          = konfirm.GroupName + "/helm-trigger"
 	TestSuiteNeedsRunCondition         = "NeedsRun"
+	TestSuiteIsStartingCondition       = "IsStarting"
 	TestSuiteRunStartedCondition       = "RunStarted"
 	TestSuiteHasScheduleCondition      = "HasSchedule"
 	TestSuiteErrorCondition            = "HasError"
@@ -82,7 +84,7 @@ func init() {
 
 // TestSuiteReconciler reconciles a TestSuite object
 type TestSuiteReconciler struct {
-	client.Client
+	impersonate.Client
 	Scheme          *runtime.Scheme
 	Recorder        record.EventRecorder
 	ErrRequeueDelay time.Duration
@@ -312,7 +314,7 @@ func (r *TestSuiteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// Phase-specific logic
-	if testSuite.Status.Phase.IsRunning() {
+	if p := testSuite.Status.Phase; p.IsRunning() || p.IsStarting() || p.IsError() {
 		return r.isRunning(ctx, &testSuite, &testRuns)
 	} else {
 		return r.notRunning(ctx, &testSuite, &testRuns)
@@ -323,7 +325,7 @@ func (r *TestSuiteReconciler) notRunning(ctx context.Context, testSuite *konfirm
 
 	logger := logging.FromContextWithName(ctx, testSuiteControllerLoggerName)
 
-	// TODO If setUp is specified, ensure it is possible
+	// Make ready to start
 	if testSuite.Status.Phase == konfirm.TestSuitePending {
 		orig := testSuite.DeepCopy()
 		testSuite.Status.Phase = konfirm.TestSuiteReady
@@ -418,13 +420,11 @@ func (r *TestSuiteReconciler) notRunning(ctx context.Context, testSuite *konfirm
 
 		// If the release is in another namespace, it must be exported to the test suite's namespace to be observed
 		ok := true
-		if pos := strings.Index(releaseName, string(types.Separator)); pos != -1 && pos < len(releaseName)-1 {
-			release.Namespace = releaseName[:pos]
-			release.Name = releaseName[pos+1:]
+		if policyName := MakeNamespacedName(releaseName); policyName.Namespace != "" {
 			policy := konfirm.HelmPolicy{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      release.Name,
-					Namespace: release.Namespace,
+					Name:      policyName.Name,
+					Namespace: policyName.Namespace,
 				},
 			}
 			if err := r.Get(ctx, client.ObjectKeyFromObject(&policy), &policy); err == nil {
@@ -529,7 +529,7 @@ func (r *TestSuiteReconciler) notRunning(ctx context.Context, testSuite *konfirm
 	}
 
 	// Trigger the test run
-	testSuite.Status.Phase = konfirm.TestSuiteRunning
+	testSuite.Status.Phase = konfirm.TestSuiteStarting
 	testSuite.Status.CurrentTestRun = ""
 	meta.SetStatusCondition(&testSuite.Status.Conditions, metav1.Condition{
 		Type:               TestSuiteNeedsRunCondition,
@@ -538,12 +538,12 @@ func (r *TestSuiteReconciler) notRunning(ctx context.Context, testSuite *konfirm
 		Reason:             trigger.Reason,
 		Message:            trigger.Message,
 	})
-	logger.Trace("setting test suite as Running")
+	logger.Trace("setting test suite as Starting")
 	if err := r.Status().Patch(ctx, testSuite, trigger.Patch); err != nil {
-		logger.Error(err, "error setting test suite as Running")
+		logger.Error(err, "error setting test suite as Starting")
 		return ctrl.Result{RequeueAfter: r.ErrRequeueDelay}, nil
 	}
-	logger.Debug("test suite set as Running")
+	logger.Debug("test suite set as Starting")
 	r.Recorder.Event(testSuite, "Normal", "TestSuiteTriggered", trigger.Message)
 
 	return ctrl.Result{}, nil
@@ -568,11 +568,40 @@ func (r *TestSuiteReconciler) isRunning(ctx context.Context, testSuite *konfirm.
 				Requeue: true,
 			}, errors.New("current test run is missing")
 		}
-	} else {
+	} else { // Test Suite was triggered but no Test Run exists yet
 
-		// Test Suite was triggered but no Test Run exists yet
+		// Perform SetUp if defined
+		if ok := r.doSetUp(ctx, testSuite); !ok {
+			var backoff time.Duration
+			if c, ok := getCondition(TestSuiteIsStartingCondition, testSuite.Status.Conditions); !ok || c.Status == metav1.ConditionFalse {
+				orig := testSuite.DeepCopy()
+				backoff = 5
+				meta.SetStatusCondition(&testSuite.Status.Conditions, metav1.Condition{
+					Type:               TestSuiteIsStartingCondition,
+					Status:             metav1.ConditionTrue,
+					ObservedGeneration: testSuite.Generation,
+					Reason:             "SettingUp",
+					Message:            "Waiting for setup to complete",
+				})
+				logger.Trace("setting IsStarting condition")
+				if err := r.Client.Status().Patch(ctx, testSuite, client.MergeFrom(orig)); err == nil {
+					logger.Debug("set IsStarting condition")
+				} else {
+					logger.Error(err, "error setting IsStarting condition")
+					return ctrl.Result{RequeueAfter: r.ErrRequeueDelay}, nil
+				}
+			} else {
+				// Start at 5s, and double with a max. of 300s (5m)
+				waitTime := time.Since(c.LastTransitionTime.Time).Seconds()
+				if waitTime >= 160 {
+					backoff = 300
+				} else {
 
-		// TODO: Perform setUp if defined
+				}
+			}
+			logger.Info("waiting %.0fs for setup to complete")
+			return ctrl.Result{RequeueAfter: backoff * time.Second}, nil
+		}
 
 		// Create the test run
 		logger.Trace("creating test run")
@@ -598,6 +627,7 @@ func (r *TestSuiteReconciler) isRunning(ctx context.Context, testSuite *konfirm.
 			},
 			Spec: konfirm.TestRunSpec{
 				RetentionPolicy: testSuite.Spec.Template.RetentionPolicy,
+				RunAs:           testSuite.Spec.RunAs,
 				Tests:           testSuite.Spec.Template.Tests,
 			},
 		}
@@ -671,6 +701,19 @@ func (r *TestSuiteReconciler) isRunning(ctx context.Context, testSuite *konfirm.
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// doSetUp performs any required setup and returns true when all set up
+// is complete. An error is returned if set up cannot be performed.
+func (r *TestSuiteReconciler) doSetUp(ctx context.Context, testSuite *konfirm.TestSuite) (ok bool) {
+	ok = true
+	return
+}
+
+// doTearDown performs any required teardown and returns true w
+func (r *TestSuiteReconciler) doTearDown(ctx context.Context, testSuite *konfirm.TestSuite) (ok bool) {
+	ok = true
+	return
 }
 
 // SetupWithManager sets up the controller with the Manager.

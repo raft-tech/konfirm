@@ -51,6 +51,10 @@ spec:
                 - Never
                 - OnFailure
                 type: string
+              runAs:
+                description: RunAs is the name of the UserRef the resulting pods will
+                  be managed by
+                type: string
               tests:
                 items:
                   description: TestTemplate describes a templated Test

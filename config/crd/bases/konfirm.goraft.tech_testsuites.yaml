@@ -42,6 +42,10 @@ spec:
                 maximum: 255
                 minimum: 0
                 type: integer
+              runAs:
+                description: RunAs is the name of the UserRef the resulting pods and
+                  any setup will be managed as
+                type: string
               setUp:
                 description: TestSuiteSetUp describes any setup that should occur
                   before the Tests are run
@@ -66,6 +70,10 @@ spec:
                     - Always
                     - Never
                     - OnFailure
+                    type: string
+                  runAs:
+                    description: RunAs is the name of the UserRef the resulting pods
+                      will be managed by
                     type: string
                   tests:
                     items:
@@ -9160,7 +9168,14 @@ spec:
                 type: string
               phase:
                 default: Pending
-                description: Phase (Pending, Ready, Running, Error)
+                description: TestSuitePhase describes the phase a TestSuite is currently
+                  in
+                enum:
+                - Pending
+                - Ready
+                - Starting
+                - Running
+                - Error
                 type: string
             type: object
           trigger:
