@@ -338,7 +338,7 @@ var _ = Describe("TestSuite Controller", func() {
 					err = k8sClient.Get(ctx, client.ObjectKeyFromObject(testSuite), testSuite)
 					labels = testSuite.Labels
 					return
-				}, timeout).Should(HaveKeyWithValue(controllers.TestSuiteHelmTriggerLabel, testSuite.Namespace+"."+testSuite.Spec.When.HelmRelease))
+				}, timeout).Should(HaveKeyWithValue(controllers.TestSuiteHelmTriggerLabel, testSuite.Spec.When.HelmRelease+"."+testSuite.Namespace))
 			})
 
 			When("the Helm release exists", func() {
@@ -451,10 +451,10 @@ var _ = Describe("TestSuite Controller", func() {
 						g.Expect(testSuite.Status.Phase).To(Equal(konfirm.TestSuiteRunning))
 						g.Expect(testSuite.Annotations[controllers.TestSuiteLastHelmReleaseAnnotation]).To(Equal(helmSecret.Labels["version"]))
 						g.Expect(testSuite.Status.Conditions).To(HaveKey(And(
-							HaveField("Type", controllers.TestSuiteRunStartedCondition),
+							HaveField("Type", controllers.TestSuiteNeedsRunCondition),
 							HaveField("Status", metav1.ConditionTrue),
-							HaveField("Reason", "HelmRelease"),
-							HaveField("Message", "TestSuite was manually triggered"),
+							HaveField("Reason", "Helm"),
+							HaveField("Message", "Test suite was triggered by a Helm release"),
 						)))
 					}, timeout)
 				})
@@ -472,7 +472,7 @@ var _ = Describe("TestSuite Controller", func() {
 					}()).NotTo(HaveOccurred())
 					Expect(k8sClient.Create(ctx, helmReleaseNamespace)).NotTo(HaveOccurred())
 					helmSecret.Namespace = helmReleaseNamespace.Name
-					testSuite.Spec.When.HelmRelease = helmReleaseNamespace.Name + "." + testSuite.Spec.When.HelmRelease
+					testSuite.Spec.When.HelmRelease = testSuite.Spec.When.HelmRelease + "." + helmReleaseNamespace.Name
 				})
 
 				AfterEach(func() {
@@ -497,10 +497,10 @@ var _ = Describe("TestSuite Controller", func() {
 							g.Expect(testSuite.Status.Phase).NotTo(Equal(konfirm.TestSuiteRunning))
 							g.Expect(testSuite.Annotations[controllers.TestSuiteLastHelmReleaseAnnotation]).NotTo(Equal(helmSecret.Labels["version"]))
 							g.Expect(testSuite.Status.Conditions).NotTo(HaveKey(And(
-								HaveField("Type", controllers.TestSuiteRunStartedCondition),
+								HaveField("Type", controllers.TestSuiteNeedsRunCondition),
 								HaveField("Status", metav1.ConditionTrue),
-								HaveField("Reason", "HelmRelease"),
-								HaveField("Message", "TestSuite was manually triggered"),
+								HaveField("Reason", "Helm"),
+								HaveField("Message", "Test suite was triggered by a Helm release"),
 							)))
 						}, timeout)
 					})
@@ -547,10 +547,10 @@ var _ = Describe("TestSuite Controller", func() {
 								g.Expect(testSuite.Status.Phase).NotTo(Equal(konfirm.TestSuiteRunning))
 								g.Expect(testSuite.Annotations[controllers.TestSuiteLastHelmReleaseAnnotation]).NotTo(Equal(helmSecret.Labels["version"]))
 								g.Expect(testSuite.Status.Conditions).NotTo(HaveKey(And(
-									HaveField("Type", controllers.TestSuiteRunStartedCondition),
+									HaveField("Type", controllers.TestSuiteNeedsRunCondition),
 									HaveField("Status", metav1.ConditionTrue),
-									HaveField("Reason", "HelmRelease"),
-									HaveField("Message", "TestSuite was manually triggered"),
+									HaveField("Reason", "Helm"),
+									HaveField("Message", "Test suite was triggered by a Helm release"),
 								)))
 							}, timeout)
 						})
@@ -566,13 +566,13 @@ var _ = Describe("TestSuite Controller", func() {
 									g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(testSuite), testSuite)).NotTo(HaveOccurred())
 									g.Expect(testSuite.Status.Phase).To(Equal(konfirm.TestSuiteRunning))
 									g.Expect(testSuite.Annotations[controllers.TestSuiteLastHelmReleaseAnnotation]).To(Equal(helmSecret.Labels["version"]))
-									g.Expect(testSuite.Status.Conditions).To(HaveKey(And(
-										HaveField("Type", controllers.TestSuiteRunStartedCondition),
+									g.Expect(testSuite.Status.Conditions).To(ContainElement(And(
+										HaveField("Type", controllers.TestSuiteNeedsRunCondition),
 										HaveField("Status", metav1.ConditionTrue),
-										HaveField("Reason", "HelmRelease"),
-										HaveField("Message", "TestSuite was manually triggered"),
+										HaveField("Reason", "Helm"),
+										HaveField("Message", "Test suite was triggered by a Helm release"),
 									)))
-								}, timeout)
+								}, timeout).Should(Succeed())
 							})
 						})
 
@@ -588,10 +588,10 @@ var _ = Describe("TestSuite Controller", func() {
 									g.Expect(testSuite.Status.Phase).To(Equal(konfirm.TestSuiteRunning))
 									g.Expect(testSuite.Annotations[controllers.TestSuiteLastHelmReleaseAnnotation]).To(Equal(helmSecret.Labels["version"]))
 									g.Expect(testSuite.Status.Conditions).To(HaveKey(And(
-										HaveField("Type", controllers.TestSuiteRunStartedCondition),
+										HaveField("Type", controllers.TestSuiteNeedsRunCondition),
 										HaveField("Status", metav1.ConditionTrue),
-										HaveField("Reason", "HelmRelease"),
-										HaveField("Message", "TestSuite was manually triggered"),
+										HaveField("Reason", "Helm"),
+										HaveField("Message", "Test suite was triggered by a Helm release"),
 									)))
 								}, timeout)
 							})
@@ -640,6 +640,7 @@ var _ = Describe("TestSuite Controller", func() {
 					})
 				}
 
+				historicalRuns = make([]konfirm.TestRun, 0, 6)
 				for i := 0; i < 6; i++ {
 					historicalRuns = append(historicalRuns, testRun)
 				}
@@ -691,6 +692,34 @@ var _ = Describe("TestSuite Controller", func() {
 						return testRun.Status.Phase, nil
 					}, timeout).Should(Equal(konfirm.TestRunPassed))
 				}
+
+				// Wait for the TestSuite to be Ready
+				Eventually(func() (konfirm.TestSuitePhase, error) {
+					err := k8sClient.Get(ctx, client.ObjectKeyFromObject(testSuite), testSuite)
+					phase := testSuite.Status.Phase
+					return phase, err
+				}, timeout).Should(Equal(konfirm.TestSuiteReady))
+			})
+
+			When("the history limit is exceeded", func() {
+
+				BeforeEach(func() {
+					testSuite.Spec.HistoryLimit = 2
+				})
+
+				It("the oldest runs are removed", func() {
+					// Since the test runs are created within milliseconds of each other,
+					// there is no enough precision to sort on time. :-( We can only confirm
+					// that the correct number of historical runs exist
+					Eventually(func() ([]konfirm.TestRun, error) {
+						list := konfirm.TestRunList{}
+						var err error
+						if err = k8sClient.List(ctx, &list, client.InNamespace(testSuite.Namespace)); err != nil {
+							return nil, err
+						}
+						return list.Items, nil
+					}, timeout).Should(HaveLen(2))
+				})
 			})
 
 			When("historical runs are deleted", func() {

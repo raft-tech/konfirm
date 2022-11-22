@@ -26,7 +26,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/rand"
+	"k8s.io/utils/strings/slices"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"strconv"
 )
 
@@ -199,4 +201,56 @@ func ParseHelmReleaseSecret(secret *v1.Secret) (release *HelmReleaseMeta, ok boo
 	}
 
 	return
+}
+
+// NamespaceIsNotIgnored is a predicate.Predicate implementation that filters
+// objects in a specified list of namespaces.
+type NamespaceIsNotIgnored struct {
+	IgnoredNamespaces []string
+}
+
+func (n NamespaceIsNotIgnored) Create(event event.CreateEvent) bool {
+	return !n.IsIgnored(event.Object.GetNamespace())
+}
+
+func (n NamespaceIsNotIgnored) Delete(event event.DeleteEvent) bool {
+	return !n.IsIgnored(event.Object.GetNamespace())
+}
+
+func (n NamespaceIsNotIgnored) Update(event event.UpdateEvent) bool {
+	return !n.IsIgnored(event.ObjectNew.GetNamespace())
+}
+
+func (n NamespaceIsNotIgnored) Generic(event event.GenericEvent) bool {
+	return !n.IsIgnored(event.Object.GetNamespace())
+}
+
+func (n *NamespaceIsNotIgnored) IsIgnored(namespace string) bool {
+	return slices.Contains(n.IgnoredNamespaces, namespace)
+}
+
+// NamespaceIsWatched is a predicate.Predicate implementation that filters
+// objects not in a specified list of namespaces.
+type NamespaceIsWatched struct {
+	WatchedNamespaces []string
+}
+
+func (n NamespaceIsWatched) Create(event event.CreateEvent) bool {
+	return n.IsWatched(event.Object.GetNamespace())
+}
+
+func (n NamespaceIsWatched) Delete(event event.DeleteEvent) bool {
+	return n.IsWatched(event.Object.GetNamespace())
+}
+
+func (n NamespaceIsWatched) Update(event event.UpdateEvent) bool {
+	return n.IsWatched(event.ObjectNew.GetNamespace())
+}
+
+func (n NamespaceIsWatched) Generic(event event.GenericEvent) bool {
+	return n.IsWatched(event.Object.GetNamespace())
+}
+
+func (n *NamespaceIsWatched) IsWatched(namespace string) bool {
+	return slices.Contains(n.WatchedNamespaces, namespace)
 }

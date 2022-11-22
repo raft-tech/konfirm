@@ -19,6 +19,7 @@ package main
 import (
 	"flag"
 	"os"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -37,7 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	konfirmv1alpha1 "github.com/raft-tech/konfirm/api/v1alpha1"
+	konfirm "github.com/raft-tech/konfirm/api/v1alpha1"
 	"github.com/raft-tech/konfirm/controllers"
 	//+kubebuilder:scaffold:imports
 )
@@ -49,8 +50,7 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-
-	utilruntime.Must(konfirmv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(konfirm.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
 }
 
@@ -67,6 +67,7 @@ func main() {
 	opts.BindFlags(flag.CommandLine)
 
 	// Manager flags
+	config := konfirm.Config{}
 	options := ctrl.Options{
 		Scheme: scheme,
 	}
@@ -91,14 +92,24 @@ func main() {
 
 	// Load config file if set
 	if configFile != "" {
-		options, err = options.AndFrom(ctrl.ConfigFile().AtPath(configFile))
+		options, err = options.AndFrom(ctrl.ConfigFile().AtPath(configFile).OfKind(&config))
 		if err != nil {
 			setupLog.Error(err, "unable to load the config file")
 			os.Exit(1)
 		}
 	}
 
+	// Predicates for ignored and watched namespaces
+	var predicates []predicate.Predicate
+	if len(config.IgnoredNamespaces) > 0 {
+		predicates = append(predicates, &controllers.NamespaceIsNotIgnored{IgnoredNamespaces: config.IgnoredNamespaces})
+	}
+	if len(config.WatchedNamespaces) > 0 {
+		predicates = append(predicates, &controllers.NamespaceIsWatched{WatchedNamespaces: config.WatchedNamespaces})
+	}
+
 	// Create the manager
+	ctx := ctrl.SetupSignalHandler()
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), options)
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
@@ -110,6 +121,7 @@ func main() {
 		Scheme:          mgr.GetScheme(),
 		Recorder:        recorder,
 		ErrRequeueDelay: time.Minute,
+		Predicates:      predicates,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Test")
 		os.Exit(1)
@@ -119,6 +131,7 @@ func main() {
 		Scheme:          mgr.GetScheme(),
 		Recorder:        recorder,
 		ErrRequeueDelay: time.Minute,
+		Predicates:      predicates,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "TestRun")
 		os.Exit(1)
@@ -128,9 +141,10 @@ func main() {
 		Scheme:          mgr.GetScheme(),
 		Recorder:        recorder,
 		ErrRequeueDelay: time.Minute,
+		Predicates:      predicates,
 		CronParser:      cron.ParseStandard,
 		Clock:           clock.RealClock{},
-	}).SetupWithManager(mgr); err != nil {
+	}).SetupWithManager(mgr, ctx); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "TestSuite")
 		os.Exit(1)
 	}
@@ -146,7 +160,7 @@ func main() {
 	}
 
 	setupLog.Info("starting manager")
-	if err = mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+	if err = mgr.Start(ctx); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}

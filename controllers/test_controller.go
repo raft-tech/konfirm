@@ -28,8 +28,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"time"
 )
 
@@ -69,6 +71,7 @@ type TestReconciler struct {
 	Scheme          *runtime.Scheme
 	Recorder        record.EventRecorder
 	ErrRequeueDelay time.Duration
+	Predicates      []predicate.Predicate
 }
 
 //+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=tests,verbs=get;list;watch
@@ -492,8 +495,14 @@ func (r *TestReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return err
 	}
 
+	// Add predicates if set (e.g., ignored namespaces
+	var opts []builder.ForOption
+	if r.Predicates != nil {
+		opts = append(opts, builder.WithPredicates(r.Predicates...))
+	}
+
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&konfirm.Test{}).
+		For(&konfirm.Test{}, opts...).
 		Owns(&v1.Pod{}).
 		Complete(r)
 }

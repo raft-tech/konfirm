@@ -40,6 +40,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest/printer"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"strings"
 	"testing"
 	//+kubebuilder:scaffold:imports
@@ -105,36 +106,47 @@ var _ = BeforeSuite(func() {
 	Expect(k8sClient).NotTo(BeNil())
 
 	// Create a manager
+	mgrCtx, mgrCancel = context.WithCancel(context.TODO())
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme: scheme.Scheme,
 	})
 	Expect(err).ToNot(HaveOccurred())
 
+	// Ignore one namespace
+	predicates := []predicate.Predicate{
+		&controllers.NamespaceIsNotIgnored{
+			IgnoredNamespaces: []string{"ignored"},
+		},
+	}
+
 	// Set up TestController
 	err = (&controllers.TestReconciler{
-		Client:   mgr.GetClient(),
-		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("test-controller"),
+		Client:     mgr.GetClient(),
+		Scheme:     mgr.GetScheme(),
+		Recorder:   mgr.GetEventRecorderFor("test-controller"),
+		Predicates: predicates,
 	}).SetupWithManager(mgr)
 	Expect(err).ToNot(HaveOccurred())
 
 	// Set up TestRunController
 	err = (&controllers.TestRunReconciler{
-		Client:   mgr.GetClient(),
-		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("testrun-controller"),
+		Client:     mgr.GetClient(),
+		Scheme:     mgr.GetScheme(),
+		Recorder:   mgr.GetEventRecorderFor("testrun-controller"),
+		Predicates: predicates,
 	}).SetupWithManager(mgr)
 	Expect(err).ToNot(HaveOccurred())
 
 	// Set up TestSuiteController
 	tsr := &controllers.TestSuiteReconciler{
-		Client:     mgr.GetClient(),
-		Scheme:     mgr.GetScheme(),
-		Recorder:   mgr.GetEventRecorderFor("testsuite-controller"),
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("testsuite-controller"),
+		//Predicates: predicates,
 		CronParser: cron.ParseStandard,
 		Clock:      &clock.RealClock{},
 	}
-	err = (tsr).SetupWithManager(mgr)
+	err = tsr.SetupWithManager(mgr, mgrCtx)
 	Expect(err).ToNot(HaveOccurred())
 
 	// Allow replacing the clock
@@ -145,7 +157,6 @@ var _ = BeforeSuite(func() {
 	}
 
 	// Start manager
-	mgrCtx, mgrCancel = context.WithCancel(context.TODO())
 	go func() {
 		defer GinkgoRecover()
 		err = mgr.Start(mgrCtx)

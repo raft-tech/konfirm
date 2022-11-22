@@ -35,7 +35,9 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 	"sort"
 	"strings"
@@ -86,6 +88,7 @@ type TestSuiteReconciler struct {
 	Scheme          *runtime.Scheme
 	Recorder        record.EventRecorder
 	ErrRequeueDelay time.Duration
+	Predicates      []predicate.Predicate
 	CronParser      func(string) (cron.Schedule, error)
 	Clock           clock.PassiveClock
 }
@@ -100,6 +103,7 @@ type testSuiteTrigger struct {
 //+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=testsuites/trigger,verbs=get;update;patch
 //+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=testsuites/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=testsuites/finalizers,verbs=update;patch
+//+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=helmpolicies,verbs=get
 //+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=testruns,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=testruns/finalizers,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=events,verbs=create;patch
@@ -217,7 +221,7 @@ func (r *TestSuiteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// Handle changes to Helm triggers
 	if release := testSuite.Spec.When.HelmRelease; release != "" {
 		if strings.Index(release, ".") == -1 {
-			release = testSuite.Namespace + "." + release
+			release = release + "." + testSuite.Namespace
 		}
 		if testSuite.ObjectMeta.Labels[TestSuiteHelmTriggerLabel] != release {
 			orig := testSuite.DeepCopy()
@@ -409,7 +413,7 @@ func (r *TestSuiteReconciler) notRunning(ctx context.Context, testSuite *konfirm
 	}
 
 	// Determine the current Helm release
-	var currentHelmRelase *HelmReleaseMeta
+	var currentHelmRelease *HelmReleaseMeta
 	if releaseName := testSuite.Spec.When.HelmRelease; releaseName != "" {
 
 		release := types.NamespacedName{
@@ -419,9 +423,9 @@ func (r *TestSuiteReconciler) notRunning(ctx context.Context, testSuite *konfirm
 
 		// If the release is in another namespace, it must be exported to the test suite's namespace to be observed
 		ok := true
-		if pos := strings.Index(releaseName, string(types.Separator)); pos != -1 && pos < len(releaseName)-1 {
-			release.Namespace = releaseName[:pos]
-			release.Name = releaseName[pos+1:]
+		if name, namespace := rSplit(releaseName, '.'); namespace != "" {
+			release.Namespace = namespace
+			release.Name = name
 			policy := konfirm.HelmPolicy{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      release.Name,
@@ -429,22 +433,24 @@ func (r *TestSuiteReconciler) notRunning(ctx context.Context, testSuite *konfirm
 				},
 			}
 			if err := r.Get(ctx, client.ObjectKeyFromObject(&policy), &policy); err == nil {
-				ok = slices.Contains(policy.Spec.ExportTo, testSuite.Namespace)
+				if len(policy.Spec.ExportTo) == 1 && policy.Spec.ExportTo[0] == "*" {
+					ok = true
+				} else if ok = slices.Contains(policy.Spec.ExportTo, testSuite.Namespace); !ok {
+					logger.Info("ignoring unexported helm release", "helmNamespace", namespace)
+				}
 			} else {
 				if err = client.IgnoreNotFound(err); err != nil {
 					logger.Error(err, "error retrieving helm policy")
 					return ctrl.Result{RequeueAfter: r.ErrRequeueDelay}, nil
-				} else {
-					logger.Info("ignoring unexported helm release trigger from another namespace")
-					ok = false
 				}
+				logger.Info("ignoring unexported helm release", "helmNamespace", namespace)
+				ok = false
 			}
 		}
 
 		if ok {
 			logger.Trace("listing matching helm releases")
 			releases := v1.SecretList{}
-			//matchingFields := client.MatchingFields(map[string]string{"type": HelmSecretType})
 			matchingLabels := client.MatchingLabels(map[string]string{"owner": "Helm", "name": release.Name, "status": "deployed"})
 			if err := r.List(ctx, &releases, client.InNamespace(release.Namespace), matchingLabels); err != nil {
 				logger.Error(err, "error listing Helm release secrets")
@@ -453,8 +459,8 @@ func (r *TestSuiteReconciler) notRunning(ctx context.Context, testSuite *konfirm
 			logger.Debug("retrieved matching helm releases")
 			for i := range releases.Items {
 				if parsed, ok := ParseHelmReleaseSecret(&releases.Items[i]); ok {
-					if currentHelmRelase == nil || currentHelmRelase.Version < parsed.Version {
-						currentHelmRelase = parsed
+					if currentHelmRelease == nil || currentHelmRelease.Version < parsed.Version {
+						currentHelmRelease = parsed
 					}
 				}
 			}
@@ -481,7 +487,7 @@ func (r *TestSuiteReconciler) notRunning(ctx context.Context, testSuite *konfirm
 		}
 		logger.Debug("reset manual trigger")
 
-	case currentHelmRelase != nil && currentHelmRelase.VersionString != testSuite.Annotations[TestSuiteLastHelmReleaseAnnotation]:
+	case currentHelmRelease != nil && currentHelmRelease.VersionString != testSuite.Annotations[TestSuiteLastHelmReleaseAnnotation]:
 		logger.Trace("test suite was triggered by a Helm release")
 		trigger = &testSuiteTrigger{
 			Reason:  "Helm",
@@ -491,7 +497,7 @@ func (r *TestSuiteReconciler) notRunning(ctx context.Context, testSuite *konfirm
 		if testSuite.Annotations == nil {
 			testSuite.Annotations = make(map[string]string)
 		}
-		testSuite.Annotations[TestSuiteLastHelmReleaseAnnotation] = testSuite.Annotations[currentHelmRelase.VersionString]
+		testSuite.Annotations[TestSuiteLastHelmReleaseAnnotation] = currentHelmRelease.VersionString
 		logger.Trace("annotating last helm release")
 		if err := r.Patch(ctx, testSuite, trigger.Patch); err != nil {
 			logger.Error(err, "error setting helm release annotation")
@@ -675,7 +681,7 @@ func (r *TestSuiteReconciler) isRunning(ctx context.Context, testSuite *konfirm.
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *TestSuiteReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *TestSuiteReconciler) SetupWithManager(mgr ctrl.Manager, mgrContext context.Context) error {
 
 	// Set up an indexer to reconcile on changes to controlled tests
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &konfirm.TestRun{}, testRunIndexKey, func(rawObj client.Object) []string {
@@ -706,10 +712,39 @@ func (r *TestSuiteReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return err
 	}
 
+	// Add predicates if set (e.g., ignored namespaces
+	var opts []builder.ForOption
+	var watchOpt []builder.WatchesOption
+	watchOpt = make([]builder.WatchesOption, 0, len(r.Predicates)+1)
+	watchOpt = append(watchOpt, builder.WithPredicates(&IsHelmRelease{}))
+	if r.Predicates != nil {
+		opts = append(opts, builder.WithPredicates(r.Predicates...))
+		watchOpt = append(watchOpt, builder.WithPredicates(r.Predicates...))
+	}
+
+	// Helm Watcher
+	helmWatcher := &EnqueueForHelmTrigger{Client: mgr.GetClient(), Context: log.IntoContext(mgrContext, mgr.GetLogger())}
+
 	return ctrl.NewControllerManagedBy(mgr).
-		// Uncomment the following line adding a pointer to an instance of the controlled resource as an argument
-		For(&konfirm.TestSuite{}).
+		For(&konfirm.TestSuite{}, opts...).
 		Owns(&konfirm.TestRun{}).
-		Watches(&source.Kind{Type: &v1.Secret{}}, &EnqueueForHelmTrigger{Client: mgr.GetClient()}, builder.WithPredicates(&IsHelmRelease{})).
+		Watches(&source.Kind{Type: &v1.Secret{}}, helmWatcher, watchOpt...).
 		Complete(r)
+}
+
+// rSplit splits a string on the last instance of the provided separator.
+func rSplit(str string, sep rune) (string, string) {
+	s := []rune(str)
+	n := len(s)
+	for i := n - 1; i >= 0; i-- {
+		if s[i] == sep {
+			s1 := string(s[:i])
+			s2 := ""
+			if j := i + 1; j < n {
+				s2 = string(s[j:])
+			}
+			return s1, s2
+		}
+	}
+	return str, ""
 }

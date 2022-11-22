@@ -24,6 +24,8 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/record"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"strconv"
 	"time"
 
@@ -47,6 +49,7 @@ type TestRunReconciler struct {
 	Scheme          *runtime.Scheme
 	Recorder        record.EventRecorder
 	ErrRequeueDelay time.Duration
+	Predicates      []predicate.Predicate
 }
 
 //+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=testruns,verbs=get;list;watch;patch
@@ -329,7 +332,7 @@ func (r *TestRunReconciler) isRunning(ctx context.Context, testRun *konfirm.Test
 	// Test run is complete
 	if failures == 0 {
 		testRun.Status.Phase = konfirm.TestRunPassed
-		testRun.Status.Message = fmt.Sprintf("%d of %d tests passed", failures, completions)
+		testRun.Status.Message = fmt.Sprintf("%d of %d tests passed", passes, completions)
 		meta.SetStatusCondition(&testRun.Status.Conditions, metav1.Condition{
 			Type:               TestRunCompletedCondition,
 			Status:             metav1.ConditionTrue,
@@ -407,9 +410,15 @@ func (r *TestRunReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return err
 	}
 
+	// Add predicates if set (e.g., ignored namespaces
+	var opts []builder.ForOption
+	if r.Predicates != nil {
+		opts = append(opts, builder.WithPredicates(r.Predicates...))
+	}
+
 	return ctrl.NewControllerManagedBy(mgr).
 		// Uncomment the following line adding a pointer to an instance of the controlled resource as an argument
-		For(&konfirm.TestRun{}).
+		For(&konfirm.TestRun{}, opts...).
 		Owns(&konfirm.Test{}).
 		Complete(r)
 }

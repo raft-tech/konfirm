@@ -23,7 +23,6 @@ import (
 	"github.com/raft-tech/konfirm/logging"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -67,6 +66,7 @@ func (_ IsHelmRelease) isHelmRelease(rawObj client.Object) bool {
 // It only responds to Create and Update events.
 type EnqueueForHelmTrigger struct {
 	client.Client
+	Context context.Context
 }
 
 func (h *EnqueueForHelmTrigger) Create(e event.CreateEvent, q workqueue.RateLimitingInterface) {
@@ -91,8 +91,7 @@ func (h *EnqueueForHelmTrigger) Generic(e event.GenericEvent, q workqueue.RateLi
 // to be enqueued for reconciliation.
 func (h *EnqueueForHelmTrigger) handle(obj client.Object, q workqueue.RateLimitingInterface) {
 
-	ctx := context.TODO()
-	logger := logging.FromContextWithName(ctx, "helmrelease-watcher", "namespace", obj.GetNamespace(), "secret", obj.GetName())
+	logger := logging.FromContextWithName(h.Context, "helmrelease-watcher", "namespace", obj.GetNamespace(), "secret", obj.GetName())
 
 	// Parse the Helm release secret
 	var release *HelmReleaseMeta
@@ -109,7 +108,7 @@ func (h *EnqueueForHelmTrigger) handle(obj client.Object, q workqueue.RateLimiti
 	logger.Trace("listing subscribed test suites")
 	testSuites := konfirm.TestSuiteList{}
 	releaseLabelMatcher := client.MatchingLabels(map[string]string{TestSuiteHelmTriggerLabel: release.LabelValue()})
-	if err := h.List(ctx, &testSuites, client.InNamespace(release.Namespace), releaseLabelMatcher); err != nil {
+	if err := h.List(h.Context, &testSuites, client.InNamespace(release.Namespace), releaseLabelMatcher); err != nil {
 		logger.Error(err, "error listing subscribed test suites")
 		return
 	}
@@ -133,7 +132,7 @@ func (h *EnqueueForHelmTrigger) handle(obj client.Object, q workqueue.RateLimiti
 		},
 	}
 	logger.Trace("checking for an associated helm policy")
-	if err := h.Get(ctx, client.ObjectKeyFromObject(&policy), &policy); err != nil {
+	if err := h.Get(h.Context, client.ObjectKeyFromObject(&policy), &policy); err != nil {
 		if err = client.IgnoreNotFound(err); err == nil {
 			logger.Debug("release is not covered by a helm policy")
 		} else {
@@ -148,15 +147,19 @@ func (h *EnqueueForHelmTrigger) handle(obj client.Object, q workqueue.RateLimiti
 	if len(policy.Spec.ExportTo) == 1 && policy.Spec.ExportTo[0] == "*" {
 		go func() {
 			defer close(reqs)
-			logger.Trace("listing subscribed tests suites in all other namespaces")
-			namespace, _ := fields.ParseSelector("metadata.namespace!=" + release.Namespace)
+			logger.Trace("listing subscribed tests suites in all namespaces")
 			testSuites = konfirm.TestSuiteList{}
-			if err := h.List(ctx, &testSuites, &client.MatchingFieldsSelector{Selector: namespace}, releaseLabelMatcher); err != nil {
+			if err := h.List(h.Context, &testSuites, releaseLabelMatcher); err != nil {
 				logger.Error(err, "error listing subscribed test suites in all other namespaces")
 				return
 			}
+			logger.Debug("listed subscribed tests suites in all namespaces")
 			var req ctrl.Request
 			for i := range testSuites.Items {
+				// Ignore the release's own namespace, since that already happened
+				if testSuites.Items[i].Namespace == release.Namespace {
+					continue
+				}
 				req = ctrl.Request{}
 				req.Namespace = testSuites.Items[i].Namespace
 				req.Name = testSuites.Items[i].Name
@@ -170,7 +173,7 @@ func (h *EnqueueForHelmTrigger) handle(obj client.Object, q workqueue.RateLimiti
 			for i := range policy.Spec.ExportTo {
 				namespace := policy.Spec.ExportTo[i]
 				testSuites = konfirm.TestSuiteList{}
-				if err := h.List(ctx, &testSuites, client.InNamespace(namespace), releaseLabelMatcher); err != nil {
+				if err := h.List(h.Context, &testSuites, client.InNamespace(namespace), releaseLabelMatcher); err != nil {
 					logger.Error(err, "error listing subscribed test suites in extra namespace", "extraNamespace", namespace)
 					return
 				}
@@ -184,9 +187,9 @@ func (h *EnqueueForHelmTrigger) handle(obj client.Object, q workqueue.RateLimiti
 			}
 		}()
 	}
-	logger.Debug("enqueuing reconciliation of subscribed test suites in extra namespaces")
+	logger.Debug("enqueuing reconciliation of subscribed test suites in additional namespaces")
 	for r := range reqs {
-		logger := logger.WithValues("extraNamespace", r.Namespace, "testSuite", r.Name)
+		logger := logger.WithValues("testNamespace", r.Namespace, "testSuite", r.Name)
 		logger.Trace("enqueuing test suite reconciliation")
 		q.AddRateLimited(r)
 		logger.Info("test suite enqueued for reconciliation")
