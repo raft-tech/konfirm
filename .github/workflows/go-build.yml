@@ -2,7 +2,7 @@ name: Go Build
 
 on:
   push:
-    branches: [ "develop" ]
+    branches: [ "develop", "sbom" ]
   pull_request:
     branches: [ "develop" ]
 
