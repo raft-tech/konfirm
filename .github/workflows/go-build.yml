@@ -43,15 +43,16 @@ jobs:
         run: go test ./...
       - name: Build an image from Dockerfile
         run: |
-          docker build -t konfirm:k8s-$ENVTEST_K8S_VERSION .
-      - name: Run Trivy in GitHub SBOM mode and submit results to Dependency Snapshots
+          docker build -t konfirm:beta-$ENVTEST_K8S_VERSION .
+      - name: Run Trivy in GitHub SBOM mode
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'image'
           format: 'spdx-json'
-          output: konfirm-k8s-$ENVTEST_K8S_VERSION.sbom.json
-          image-ref: konfirm:k8s-$ENVTEST_K8S_VERSION
-      - uses: actions/upload-artifact@v3
+          output: konfirm-beta-$ENVTEST_K8S_VERSION.sbom.json
+          image-ref: konfirm:beta-$ENVTEST_K8S_VERSION
+      - name: Upload SBOM to pipeline
+        uses: actions/upload-artifact@v3
         with:
-          name: 'konfirm.sbom.zip'
-          path: './*.sbom.json'
+          name: konfirm-beta-$ENVTEST_K8S_VERSION.sbom.json
+          path: konfirm-beta-$ENVTEST_K8S_VERSION.sbom.json
