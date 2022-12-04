@@ -41,18 +41,24 @@ jobs:
           echo "KUBEBUILDER_ASSETS=$(bin/setup-envtest use $ENVTEST_K8S_VERSION -p path)" >> $GITHUB_ENV
       - name: Test
         run: go test ./...
+  Secure:
+    needs: Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
       - name: Build an image from Dockerfile
         run: |
-          docker build -t konfirm:beta-$ENVTEST_K8S_VERSION .
+          docker build -t konfirm:dev .
       - name: Run Trivy in GitHub SBOM mode
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'image'
           format: 'spdx-json'
-          output: konfirm-beta-$ENVTEST_K8S_VERSION.sbom.json
-          image-ref: konfirm:beta-$ENVTEST_K8S_VERSION
+          output: konfirm-dev.sbom.json
+          image-ref: konfirm:dev
       - name: Upload SBOM to pipeline
         uses: actions/upload-artifact@v3
         with:
-          name: konfirm-beta-$ENVTEST_K8S_VERSION.sbom.json
-          path: konfirm-beta-$ENVTEST_K8S_VERSION.sbom.json
+          name: konfirm-dev.sbom.json
+          path: konfirm-dev.sbom.json
