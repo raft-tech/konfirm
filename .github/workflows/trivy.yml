@@ -2,7 +2,7 @@ name: Trivy Scan
 
 on:
   push:
-    branches: [ "develop", "sbom" ]
+    branches: [ "develop" ]
   pull_request:
     # The branches below must be a subset of the branches above
     branches: [ "develop" ]
@@ -42,7 +42,3 @@ jobs:
         with:
           sarif_file: 'trivy-results.sarif'
 
-      - uses: actions/upload-artifact@v3
-        with:
-          name: 'trivy-results.sarif'
-          path: './trivy-results.sarif'
