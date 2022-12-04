@@ -44,26 +44,13 @@ jobs:
       - name: Build an image from Dockerfile
         run: |
           docker build -t konfirm:k8s-$ENVTEST_K8S_VERSION .
-  Secure:
-    needs: Test
-    permissions:
-      contents: read # for actions/checkout to fetch code
-      security-events: write # for github/codeql-action/upload-sarif to upload SARIF results
-      actions: read # only required for a private repository by github/codeql-action/upload-sarif to get the Action run status
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        k8s-version: [ "1.22", "1.23", "1.24", "1.25" ]
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
       - name: Run Trivy in GitHub SBOM mode and submit results to Dependency Snapshots
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'image'
           format: 'spdx-json'
-          output: 'konfirm-k8s-$ENVTEST_K8S_VERSION.sbom.json'
-          image-ref: 'konfirm:k8s-$ENVTEST_K8S_VERSION'
+          output: konfirm-k8s-$ENVTEST_K8S_VERSION.sbom.json
+          image-ref: konfirm:k8s-$ENVTEST_K8S_VERSION
       - uses: actions/upload-artifact@v3
         with:
           name: 'konfirm.sbom.zip'
