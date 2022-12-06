@@ -50,7 +50,7 @@ jobs:
       - name: Build an image from Dockerfile
         run: |
           docker build -t konfirm:dev .
-      - name: Run Trivy in GitHub SBOM mode
+      - name: Generate SPDX JSON format SBOM
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'image'
