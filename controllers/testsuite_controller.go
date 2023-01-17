@@ -596,6 +596,7 @@ func (r *TestSuiteReconciler) isRunning(ctx context.Context, testSuite *konfirm.
 			},
 			Spec: konfirm.TestRunSpec{
 				RetentionPolicy: testSuite.Spec.Template.RetentionPolicy,
+				Hook:            testSuite.Spec.Template.Hook,
 				Tests:           testSuite.Spec.Template.Tests,
 			},
 		}

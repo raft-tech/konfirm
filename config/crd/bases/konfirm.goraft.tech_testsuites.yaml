@@ -60,6 +60,30 @@ spec:
               template:
                 description: TestRunSpec defines the desired state of TestRun
                 properties:
+                  hook:
+                    description: TestRunHook defines Hooks to execute before/after
+                      a slice of TestTemplate
+                    properties:
+                      helm:
+                        description: HelmHook defines configuration necessary to perform
+                          a Helm install
+                        properties:
+                          name:
+                            type: string
+                          namespace:
+                            type: string
+                          path:
+                            type: string
+                          values:
+                            description: Values    map[string]interface{} `json:"values,omitempty"`
+                            type: object
+                          version:
+                            type: string
+                        required:
+                        - name
+                        - path
+                        type: object
+                    type: object
                   retentionPolicy:
                     default: OnFailure
                     enum:

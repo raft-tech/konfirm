@@ -6,6 +6,11 @@ spec:
     when:
       cron: "1-59 * * * *"
     template:
+      hook:
+        helm:
+          name: "before-hook"
+          namespace: "default"
+          path: "https://github.com/kubernetes/ingress-nginx/releases/download/helm-chart-4.0.18/ingress-nginx-4.0.18.tgz"
       tests:
       - description: Generals gathered in their masses
         template:

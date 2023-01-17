@@ -18,6 +18,7 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -41,8 +42,36 @@ type TestRunSpec struct {
 	// +kubebuilder:default=OnFailure
 	RetentionPolicy RetainPolicy `json:"retentionPolicy,omitempty"`
 
+	Hook TestRunHook `json:"hook,omitempty"`
+
 	// +kubebuilder:validation:MinItems=1
 	Tests []TestTemplate `json:"tests"`
+}
+
+type UnstructuredData unstructured.Unstructured
+
+func (in *UnstructuredData) DeepCopyInto(out *UnstructuredData) {
+	// controller-gen cannot handle the interface{} type of an aliased Unstructured, thus we write our own DeepCopyInto function.
+	if out != nil {
+		casted := unstructured.Unstructured(*in)
+		deepCopy := casted.DeepCopy()
+		out.Object = deepCopy.Object
+	}
+}
+
+// HelmHook defines configuration necessary to perform a Helm install
+type HelmHook struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace,omitempty"`
+	Path      string `json:"path"`
+	Version   string `json:"version,omitempty"`
+	//Values    map[string]interface{} `json:"values,omitempty"`
+	Values UnstructuredData `json:"values,omitempty"`
+}
+
+// TestRunHook defines Hooks to execute before/after a slice of TestTemplate
+type TestRunHook struct {
+	Helm HelmHook `json:"helm,omitempty"`
 }
 
 // TestResult describes the outcome of a completed Test
