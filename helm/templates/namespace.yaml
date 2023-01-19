@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  labels:
+    control-plane: controller-manager
+    {{- if .Values.istio }}
+    istio-injection: enabled
+    {{- end }}
+    {{- include "konfirm.labels" . | nindent 4 }}
+  name: konfirm-system

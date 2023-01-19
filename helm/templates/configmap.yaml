@@ -1,0 +1,23 @@
+{{- if .Values.leaderElection.enabled  }}
+apiVersion: v1
+data:
+  controller_manager_config.yaml: |
+    apiVersion: controller-runtime.sigs.k8s.io/v1alpha1
+    kind: ControllerManagerConfig
+    apiVersion: controller-runtime.sigs.k8s.io/v1alpha1
+    kind: ControllerManagerConfig
+    health:
+      healthProbeBindAddress: :{{ .Values.controller.health.port }}
+    metrics:
+      bindAddress: {{ .Values.controller.metrics.address }}:{{ .Values.controller.metrics.port }}
+    webhook:
+      port: {{ .Values.controller.webhook.port }}
+    leaderElection:
+      leaderElect: {{ .Values.controller.leaderElection.enabled }}
+      resourceName: {{ .Values.controller.leaderElection.resource }}
+kind: ConfigMap
+metadata:
+  name: konfirm-manager-config
+  namespace: konfirm-system
+  labels:
+    {{- include "konfirm.labels" . | nindent 4 }}

@@ -1,0 +1,18 @@
+{{- if .Values.monitoring -}}
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: konfirm-controller-manager
+  namespace: konfirm-system
+  labels:
+    {{- include "konfirm.labels" . | nindent 4 }}
+spec:
+  namespaceSelector:
+    matchNames:
+    - konfirm-system
+  podMetricsEndpoints:
+  - port: metrics
+  selector:
+    matchLabels:
+      control-plane: controller-manager
+{{- end }}
