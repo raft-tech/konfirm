@@ -18,18 +18,13 @@ spec:
       labels:
         control-plane: controller-manager
     spec:
-      {{- with .Values.controller.imagePullSecrets }}
-      imagePullSecrets:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
+      imagePullSecrets: {{ .Values.controller.imagePullSecrets }}
+      topologySpreadConstraints: {{ .Values.controller.topologySpreadConstraints }}
       containers:
-      -  command:
+      - command:
         - /manager
-        {{- with .Values.controller.args }}
-        args:
-          {{- toYaml . | nindent 10 }}
-        {{- end }}
-        image: "{{ Values.controller.image }}:{{ .Values.controller.tag }}"
+        args: {{ .Values.controller.args }}
+        image: "{{ .Values.controller.image }}:{{ .Values.controller.tag }}"
         livenessProbe:
           httpGet:
             path: /healthz
@@ -50,6 +45,14 @@ spec:
           {{- toYaml .Values.controller.resources | nindent 10 }}
         securityContext:
           allowPrivilegeEscalation: false
+        volumeMounts:
+        - name: konfirm-manager-config
+          mountPath: /controller_manager_config.yaml
+          subPath: controller_manager_config.yaml
+      volumes:
+      - name: konfirm-manager-config
+        configMap:
+          name: konfirm-manager-config
       securityContext:
         runAsNonRoot: true
       serviceAccountName: {{ .Values.serviceAccount.name }}

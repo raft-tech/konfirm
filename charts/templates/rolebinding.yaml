@@ -11,5 +11,5 @@ roleRef:
   name: konfirm-leader-election-role
 subjects:
 - kind: ServiceAccount
-  name: {{ .Values.serviceAccount.Name }}
+  name: {{ .Values.serviceAccount.name }}
   namespace: konfirm-system

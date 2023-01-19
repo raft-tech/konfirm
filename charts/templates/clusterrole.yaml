@@ -9,6 +9,14 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - secrets
+  verbs:
+  - list
+  - get
+  - watch
+- apiGroups:
+  - ""
+  resources:
   - events
   verbs:
   - create
@@ -69,6 +77,14 @@ rules:
   verbs:
   - get
   - patch
+- apiGroups:
+  - konfirm.goraft.tech
+  resources:
+  - helmpolicies
+  verbs:
+  - get
+  - list
+  - watch
 - apiGroups:
   - konfirm.goraft.tech
   resources:

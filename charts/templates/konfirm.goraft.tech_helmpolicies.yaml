@@ -4,9 +4,24 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.8.0
+{{- if .Values.certmanager }}
+    cert-manager.io/inject-ca-from: $(CERTIFICATE_NAMESPACE)/$(CERTIFICATE_NAME)
+{{- end }}
   creationTimestamp: null
   name: helmpolicies.konfirm.goraft.tech
 spec:
+{{- if .Values.webhook }}
+  conversion:
+    strategy: Webhook
+    webhook:
+      clientConfig:
+        service:
+          namespace: system
+          name: webhook-service
+          path: /convert
+      conversionReviewVersions:
+      - v1
+{{- end }}
   group: konfirm.goraft.tech
   names:
     kind: HelmPolicy
