@@ -26,6 +26,11 @@ import (
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/kubernetes/fake"
+	fake2 "k8s.io/client-go/kubernetes/typed/core/v1/fake"
+	"k8s.io/client-go/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"strconv"
 	"time"
@@ -97,6 +102,36 @@ var _ = Describe("On Test Controller reconciliation", func() {
 			}
 		})
 
+		fakeClient := fake.NewSimpleClientset()
+
+		It("it errors getting test", func() {
+			getTestErr := apierrors.NewNotFound(schema.GroupResource{Group: "", Resource: "test"}, "test-example")
+			fakeClient.CoreV1().(*fake2.FakeCoreV1).PrependReactor("get", "tests", func(action testing.Action) (handled bool, ret runtime.Object, err error) {
+				return true, &konfirm.Test{}, getTestErr
+			})
+			Expect(client.IgnoreNotFound(getTestErr)).NotTo(HaveOccurred())
+			Expect(apierrors.IsNotFound(getTestErr)).To(BeTrue())
+		})
+
+		It("test resource no longer exists", func() {
+			getTestErr := errors.New("error getting test")
+			fakeClient.CoreV1().(*fake2.FakeCoreV1).PrependReactor("get", "tests", func(action testing.Action) (handled bool, ret runtime.Object, err error) {
+				return true, &konfirm.Test{}, getTestErr
+			})
+			Expect(client.IgnoreNotFound(getTestErr)).To(HaveOccurred())
+			Expect(apierrors.IsNotFound(getTestErr)).To(BeFalse())
+		})
+
+		// TODO confirm that this works forreal
+		It("it cannot set test phase as Pending", func() {
+			phaseTestErr := errors.New("error setting test phase to Pending")
+			fakeClient.CoreV1().(*fake2.FakeCoreV1).PrependReactor("patch", "test", func(action testing.Action) (handled bool, ret runtime.Object, err error) {
+				return true, &konfirm.Test{}, phaseTestErr
+			})
+			Expect(client.IgnoreNotFound(phaseTestErr)).To(HaveOccurred())
+			Expect(apierrors.IsNotFound(phaseTestErr)).To(BeFalse())
+		})
+
 		It("an associated pod should be created", func() {
 			Eventually(func() bool {
 				pods := &v1.PodList{}
@@ -133,6 +168,22 @@ var _ = Describe("On Test Controller reconciliation", func() {
 				HaveField("Status", metav1.ConditionFalse),
 				HaveField("Reason", "PodNotCompleted"),
 			)), "have the expected TestCompleted condition")
+		})
+
+		// TODO confirm why IgnoreNotFound checks seem to work even when it's not declared in source function
+		It("test cannot be set to Starting", func() {
+			phaseErr := errors.New("error setting test as Starting")
+			fakeClient.CoreV1().(*fake2.FakeCoreV1).PrependReactor("patch", "tests", func(action testing.Action) (handled bool, ret runtime.Object, err error) {
+				return true, &konfirm.Test{}, phaseErr
+			})
+			Eventually(func() (phase konfirm.TestPhase, err error) {
+				if err = k8sClient.Get(ctx, client.ObjectKeyFromObject(test), test); err == nil {
+					phase = test.Status.Phase
+				}
+				return
+			}, timeout).Should(Equal(konfirm.TestStarting))
+			Expect(client.IgnoreNotFound(phaseErr)).To(HaveOccurred())
+			Expect(apierrors.IsNotFound(phaseErr)).To(BeFalse())
 		})
 
 		Context("and the associated pod exists", func() {
@@ -179,6 +230,23 @@ var _ = Describe("On Test Controller reconciliation", func() {
 						HaveField("Reason", "PodCreated"),
 					)), "have the expected PodCreated condition")
 				})
+
+				// TODO no IgnoreNotFound confirm why it works
+				It("test cannot be set to Running", func() {
+					phaseErr := errors.New("error setting test as Running")
+					fakeClient.CoreV1().(*fake2.FakeCoreV1).PrependReactor("patch", "tests", func(action testing.Action) (handled bool, ret runtime.Object, err error) {
+						return true, &konfirm.Test{}, phaseErr
+					})
+					Eventually(func() (phase konfirm.TestPhase, err error) {
+						if err = k8sClient.Get(ctx, client.ObjectKeyFromObject(test), test); err == nil {
+							phase = test.Status.Phase
+						}
+						return
+					}, timeout).Should(Equal(konfirm.TestRunning))
+					Expect(client.IgnoreNotFound(phaseErr)).To(HaveOccurred())
+					Expect(apierrors.IsNotFound(phaseErr)).To(BeFalse())
+				})
+
 			})
 
 			When("and the pod succeeds", func() {
@@ -230,11 +298,55 @@ var _ = Describe("On Test Controller reconciliation", func() {
 					)), "have the expected TestCompleted condition")
 				})
 
+				// TODO no IgnoreNotFound confirm why it works
+				It("test cannot be set to Succeeded", func() {
+					phaseErr := errors.New("error setting test as Passed")
+					fakeClient.CoreV1().(*fake2.FakeCoreV1).PrependReactor("patch", "tests", func(action testing.Action) (handled bool, ret runtime.Object, err error) {
+						return true, &konfirm.Test{}, phaseErr
+					})
+					Eventually(func() (phase konfirm.TestPhase, err error) {
+						if err = k8sClient.Get(ctx, client.ObjectKeyFromObject(test), test); err == nil {
+							phase = test.Status.Phase
+						}
+						return
+					}, timeout).Should(Equal(konfirm.TestPassed))
+					Expect(client.IgnoreNotFound(phaseErr)).To(HaveOccurred())
+					Expect(apierrors.IsNotFound(phaseErr)).To(BeFalse())
+				})
+
 				It("the pod is deleted", func() {
 					Eventually(func() bool {
 						err := k8sClient.Get(ctx, client.ObjectKeyFromObject(pod), &v1.Pod{})
 						return apierrors.IsNotFound(err)
 					}, timeout).Should(BeTrue())
+				})
+
+				It("pods cannot be deleted", func() {
+					deleteTestErr := errors.New("error deleting test")
+					fakeClient.CoreV1().(*fake2.FakeCoreV1).PrependReactor("delete", "tests", func(action testing.Action) (handled bool, ret runtime.Object, err error) {
+						return true, &konfirm.Test{}, deleteTestErr
+					})
+					Expect(client.IgnoreNotFound(deleteTestErr)).To(HaveOccurred())
+				})
+
+				It("it cannot set the finalizer test DNE", func() {
+					pod.ObjectMeta.Finalizers = []string{}
+					setFinalizerErr := errors.New("error setting finalizer test DNE")
+					fakeClient.CoreV1().(*fake2.FakeCoreV1).PrependReactor("patch", "pods", func(action testing.Action) (handled bool, ret runtime.Object, err error) {
+						return true, &konfirm.Test{}, setFinalizerErr
+					})
+					Expect(client.IgnoreNotFound(setFinalizerErr)).To(HaveOccurred())
+					Expect(apierrors.IsNotFound(setFinalizerErr)).To(BeFalse())
+				})
+
+				It("it cannot set the finalizer", func() {
+					pod.ObjectMeta.Finalizers = []string{}
+					setFinalizerErr := apierrors.NewNotFound(schema.GroupResource{Group: "", Resource: "pod"}, "test-example")
+					fakeClient.CoreV1().(*fake2.FakeCoreV1).PrependReactor("patch", "pods", func(action testing.Action) (handled bool, ret runtime.Object, err error) {
+						return true, &konfirm.Test{}, setFinalizerErr
+					})
+					Expect(client.IgnoreNotFound(setFinalizerErr)).ToNot(HaveOccurred())
+					Expect(apierrors.IsNotFound(setFinalizerErr)).To(BeTrue())
 				})
 
 				When("the retention policy is Always", func() {
@@ -270,6 +382,14 @@ var _ = Describe("On Test Controller reconciliation", func() {
 							Eventually(func() error {
 								return k8sClient.Get(ctx, client.ObjectKeyFromObject(pod), pod)
 							}, timeout).Should(Satisfy(apierrors.IsNotFound))
+						})
+
+						It("it cannot remove the finalizer", func() {
+							rmFinalizerErr := errors.New("error removing finalizer")
+							fakeClient.CoreV1().(*fake2.FakeCoreV1).PrependReactor("patch", "pods", func(action testing.Action) (handled bool, ret runtime.Object, err error) {
+								return true, &konfirm.Test{}, rmFinalizerErr
+							})
+							Expect(client.IgnoreNotFound(rmFinalizerErr)).To(HaveOccurred())
 						})
 					})
 				})
@@ -352,6 +472,21 @@ var _ = Describe("On Test Controller reconciliation", func() {
 					)), "have the expected TestCompleted condition")
 				})
 
+				It("it cannot remove the finalizer", func() {
+					phaseErr := errors.New("error setting test as Failed")
+					fakeClient.CoreV1().(*fake2.FakeCoreV1).PrependReactor("patch", "tests", func(action testing.Action) (handled bool, ret runtime.Object, err error) {
+						return true, &konfirm.Test{}, phaseErr
+					})
+					Eventually(func() (phase konfirm.TestPhase, err error) {
+						if err = k8sClient.Get(ctx, client.ObjectKeyFromObject(test), test); err == nil {
+							phase = test.Status.Phase
+						}
+						return
+					}, timeout).Should(Equal(konfirm.TestFailed))
+					Expect(client.IgnoreNotFound(phaseErr)).To(HaveOccurred())
+					Expect(apierrors.IsNotFound(phaseErr)).To(BeFalse())
+				})
+
 				It("the pod is retained", func() {
 					Consistently(func() bool {
 						err := k8sClient.Get(ctx, client.ObjectKeyFromObject(pod), &v1.Pod{})
@@ -379,6 +514,13 @@ var _ = Describe("On Test Controller reconciliation", func() {
 						Eventually(func() error {
 							return k8sClient.Get(ctx, client.ObjectKeyFromObject(pod), pod)
 						}, timeout).Should(Satisfy(apierrors.IsNotFound))
+					})
+					It("it cannot remove the finalizer", func() {
+						rmFinalizerErr := errors.New("error removing finalizer")
+						fakeClient.CoreV1().(*fake2.FakeCoreV1).PrependReactor("patch", "pods", func(action testing.Action) (handled bool, ret runtime.Object, err error) {
+							return true, &konfirm.Test{}, rmFinalizerErr
+						})
+						Expect(client.IgnoreNotFound(rmFinalizerErr)).To(HaveOccurred())
 					})
 				})
 
@@ -415,6 +557,14 @@ var _ = Describe("On Test Controller reconciliation", func() {
 							Eventually(func() error {
 								return k8sClient.Get(ctx, client.ObjectKeyFromObject(pod), pod)
 							}, timeout).Should(Satisfy(apierrors.IsNotFound))
+						})
+
+						It("it cannot remove the finalizer", func() {
+							rmFinalizerErr := errors.New("error removing finalizer")
+							fakeClient.CoreV1().(*fake2.FakeCoreV1).PrependReactor("patch", "pods", func(action testing.Action) (handled bool, ret runtime.Object, err error) {
+								return true, &konfirm.Test{}, rmFinalizerErr
+							})
+							Expect(client.IgnoreNotFound(rmFinalizerErr)).To(HaveOccurred())
 						})
 					})
 				})
@@ -544,10 +694,28 @@ var _ = Describe("On Test Controller reconciliation", func() {
 					}, timeout).Should(Satisfy(apierrors.IsNotFound))
 				})
 
+				It("it cannot remove the finalizer", func() {
+					rmFinalizerErr := errors.New("error removing finalizer")
+					fakeClient.CoreV1().(*fake2.FakeCoreV1).PrependReactor("patch", "pods", func(action testing.Action) (handled bool, ret runtime.Object, err error) {
+						return true, &konfirm.Test{}, rmFinalizerErr
+					})
+					Expect(client.IgnoreNotFound(rmFinalizerErr)).To(HaveOccurred())
+				})
+
 				It("creates a new pod", func() {
 					Eventually(func() ([]v1.Pod, error) {
 						return getPods(ctx, test)
 					}, timeout).Should(ContainElement(HaveField("UID", Not(Equal(pod.UID)))))
+				})
+
+				// TODO confirm if this is working
+				It("it cannot create a new pod", func() {
+					createPodErr := errors.New("error creating new pod")
+					fakeClient.CoreV1().(*fake2.FakeCoreV1).PrependReactor("create", "pods", func(action testing.Action) (handled bool, ret runtime.Object, err error) {
+						return true, &konfirm.Test{}, createPodErr
+					})
+					Expect(client.IgnoreNotFound(createPodErr)).To(HaveOccurred())
+
 				})
 			})
 
@@ -574,4 +742,7 @@ var _ = Describe("On Test Controller reconciliation", func() {
 			})
 		})
 	})
+
+	// TODO tests for SetupWithManager ?
+
 })
