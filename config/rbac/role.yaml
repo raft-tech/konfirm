@@ -8,6 +8,20 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - '*'
+  verbs:
+  - '*'
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
   - events
   verbs:
   - create
@@ -30,6 +44,22 @@ rules:
   - pods/status
   verbs:
   - get
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - serviceaccounts
+  verbs:
+  - get
+  - list
+  - watch
 - apiGroups:
   - konfirm.goraft.tech
   resources:

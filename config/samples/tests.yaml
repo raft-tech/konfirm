@@ -4,7 +4,7 @@ metadata:
   name: sample
 spec:
     when:
-      cron: "1-59 * * * *"
+      cron: "*/5 * * * *"
     template:
       hook:
         helm:
@@ -30,8 +30,8 @@ spec:
             containers:
               - name: test
                 image: konfirm/mock:v0.1.0
-                args:
-                  - "--fail"
+#                 args:
+#                   - "--fail"
       - description: Sorcerer of death's construction
         template:
           spec:
@@ -39,5 +39,5 @@ spec:
               - name: test
                 image: konfirm/mock:v0.1.0
                 args:
-                  - "--fail"
+#                   - "--fail"
                   - "by Black Sabbath"

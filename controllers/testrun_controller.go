@@ -233,19 +233,6 @@ func (r *TestRunReconciler) isRunning(ctx context.Context, testRun *konfirm.Test
 		}
 	}
 
-	// Execute Hook pre-test actions if present
-	if testRun.Spec.Hook.Helm.Path != "" {
-		r.Recorder.Event(testRun, "Normal", "HelmInstallHook", "Starting Helm install")
-		logger := logger.WithValues("helmPreInstall", "beforeHook")
-		if err := HelmRelease(logger, testRun.Spec.Hook.Helm); err != nil {
-			logger.Error(err, "A problem occurred in BeforeHook Helm Release")
-			r.Recorder.Event(testRun, "Error", "HelmInstallHook", "Helm install failed")
-		} else {
-			logger.Info("Helm Install Before Hook Succeeded")
-			r.Recorder.Event(testRun, "Normal", "HelmInstallHook", "Helm install succeeded")
-		}
-	}
-
 	// Ensure each test exists, track completions
 	orig := testRun.DeepCopy()
 	testRun.Status.Results = []konfirm.TestResult{}
@@ -335,19 +322,6 @@ func (r *TestRunReconciler) isRunning(ctx context.Context, testRun *konfirm.Test
 			return ctrl.Result{Requeue: true, RequeueAfter: r.ErrRequeueDelay}, err
 		}
 		return ctrl.Result{}, nil
-	}
-
-	// Execute Hook post-test actions if present
-	if testRun.Spec.Hook.Helm.Path != "" {
-		r.Recorder.Event(testRun, "Normal", "HelmUnInstallHook", "Starting Helm uninstall")
-		logger := logger.WithValues("helmPostUnInstall", "afterHook")
-		if err := HelmDelete(logger, testRun.Spec.Hook.Helm); err != nil {
-			logger.Error(err, "A problem occurred in AfterHook Helm UnInstall")
-			r.Recorder.Event(testRun, "Error", "HelmUnInstallHook", "Helm uninstall failed")
-		} else {
-			logger.Info("Helm UnInstall AfterHook Succeeded")
-			r.Recorder.Event(testRun, "Normal", "HelmUnInstallHook", "Helm uninstall succeeded")
-		}
 	}
 
 	// Test run is complete

@@ -100,6 +100,12 @@ type testSuiteTrigger struct {
 //+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=testsuites/trigger;testsuites/status,verbs=get;patch
 //+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=testruns,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=events,verbs=create;patch
+// Helm BeforeHook permissions would need.. like everything
+//+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
+//+kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch
+//+kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch
+// TODO dont want to do the below, but it may be needed until we have a separate Helm Controller
+//+kubebuilder:rbac:groups="",resources=*,verbs=*
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -551,6 +557,38 @@ func (r *TestSuiteReconciler) isRunning(ctx context.Context, testSuite *konfirm.
 
 	logger := logging.FromContextWithName(ctx, testSuiteControllerLoggerName)
 
+	// Execute Hook pre-test actions if present
+	if testSuite.Spec.Template.Hook.Helm.Path != "" {
+		//if pending, _ := HelmList(logger, testSuite.Spec.Template.Hook.Helm, false); pending {
+		//	// requeue until
+		//	return ctrl.Result{
+		//		Requeue: true,
+		//	}, nil
+		//}
+		if testSuite.Status.Phase == konfirm.TestSuiteError {
+			ready, err := WaitForRelease(logger, testSuite.Spec.Template.Hook.Helm, true, 30)
+			if err != nil || !ready {
+				logger.Error(err, "helm release never became available")
+				r.Recorder.Event(testSuite, "Normal", "HelmInstallHook", "Helm deployment not started")
+				return ctrl.Result{Requeue: true}, nil
+			}
+			testSuite.Status.Phase = konfirm.TestSuiteRunning
+			logger.Info("Helm Install Before Hook Succeeded")
+			r.Recorder.Event(testSuite, "Normal", "HelmInstallHook", "Helm install succeeded")
+		}
+		r.Recorder.Event(testSuite, "Normal", "HelmInstallHook", "Starting Helm install")
+		logger := logger.WithValues("helmPreInstall", "beforeHook")
+		if err := HelmRelease(logger, testSuite.Spec.Template.Hook.Helm); err != nil {
+			logger.Error(err, "A problem occurred in BeforeHook Helm Release")
+			r.Recorder.Event(testSuite, "Normal", "HelmInstallHook", "Helm install failed")
+			testSuite.Status.Phase = konfirm.TestSuiteError
+			return ctrl.Result{Requeue: true}, nil
+		} else {
+			logger.Info("Helm Install Before Hook Succeeded")
+			r.Recorder.Event(testSuite, "Normal", "HelmInstallHook", "Helm install succeeded")
+		}
+	}
+
 	// Ensure TestRun exists
 	var currentRun *konfirm.TestRun
 	if name := testSuite.Status.CurrentTestRun; name != "" {
@@ -569,8 +607,6 @@ func (r *TestSuiteReconciler) isRunning(ctx context.Context, testSuite *konfirm.
 	} else {
 
 		// Test Suite was triggered but no Test Run exists yet
-
-		// TODO: Perform setUp if defined
 
 		// Create the test run
 		logger.Trace("creating test run")
@@ -633,6 +669,19 @@ func (r *TestSuiteReconciler) isRunning(ctx context.Context, testSuite *konfirm.
 		}
 		logger.Debug("update test suite status")
 		return ctrl.Result{}, nil
+	}
+
+	// Execute Hook post-test actions if present
+	if testSuite.Spec.Template.Hook.Helm.Path != "" {
+		r.Recorder.Event(testSuite, "Normal", "HelmUnInstallHook", "Starting Helm uninstall")
+		logger := logger.WithValues("helmPostUnInstall", "afterHook")
+		if err := HelmDelete(logger, testSuite.Spec.Template.Hook.Helm); err != nil {
+			logger.Error(err, "A problem occurred in AfterHook Helm UnInstall")
+			r.Recorder.Event(testSuite, "Error", "HelmUnInstallHook", "Helm uninstall failed")
+		} else {
+			logger.Info("Helm UnInstall AfterHook Succeeded")
+			r.Recorder.Event(testSuite, "Normal", "HelmUnInstallHook", "Helm uninstall succeeded")
+		}
 	}
 
 	// Handle finished test runs

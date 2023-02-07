@@ -10,6 +10,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 )
 
 func releaseName(stageName string, projectPath string) string {
@@ -99,8 +100,13 @@ func initialize(logger *logging.Logger, namespace string) (*action.Configuration
 func HelmRelease(logger *logging.Logger, config v1alpha1.HelmHook) error {
 	err := install(logger, config)
 	if err != nil {
-		logger.Info(fmt.Sprintf("Helm release %s already exsits. Performing Helm upgrade...", config.Name))
-		err = upgrade(logger, config)
+		logger.Info(fmt.Sprintf("Helm release %s already started", config.Name))
+		//err = upgrade(logger, config)
+		return err
+	}
+	ready, err := WaitForRelease(logger, config, true, 1)
+	if err != nil || !ready {
+		return err
 	}
 	return err
 }
@@ -114,4 +120,28 @@ func HelmDelete(logger *logging.Logger, config v1alpha1.HelmHook) error {
 	release := releaseName(config.Name, config.Path)
 	_, err = client.Run(release)
 	return err
+}
+
+func WaitForRelease(logger *logging.Logger, config v1alpha1.HelmHook, deployed bool, iterations int) (bool, error) {
+	actionConfig, _, err := initialize(logger, config.Namespace)
+	if err != nil {
+		return false, err
+	}
+	client := action.NewList(actionConfig)
+	client.All = true
+	client.Deployed = deployed
+	releaseName := releaseName(config.Name, config.Path)
+	for i := 0; i < iterations; i++ {
+		releases, err := client.Run()
+		if err != nil {
+			return false, err
+		}
+		for _, r := range releases {
+			if r.Name == releaseName && r.Namespace == config.Namespace {
+				return true, nil
+			}
+		}
+		time.Sleep(3000000000)
+	}
+	return false, nil
 }
