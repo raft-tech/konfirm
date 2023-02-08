@@ -62,10 +62,12 @@ var _ = Describe("On Test Controller reconciliation", func() {
 	When("a test is created", func() {
 
 		var (
-			test *konfirm.Test
+			test       *konfirm.Test
+			fakeClient *fake.Clientset
 		)
 
 		BeforeEach(func() {
+			fakeClient = fake.NewSimpleClientset()
 			test = &konfirm.Test{
 				TypeMeta: metav1.TypeMeta{
 					APIVersion: konfirm.GroupVersion.String(),
@@ -101,8 +103,6 @@ var _ = Describe("On Test Controller reconciliation", func() {
 				Expect(client.IgnoreNotFound(err)).NotTo(HaveOccurred())
 			}
 		})
-
-		fakeClient := fake.NewSimpleClientset()
 
 		It("it errors getting test", func() {
 			getTestErr := apierrors.NewNotFound(schema.GroupResource{Group: "", Resource: "test"}, "test-example")
