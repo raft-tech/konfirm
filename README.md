@@ -48,6 +48,13 @@ UnDeploy the controller to the cluster:
 make undeploy
 ```
 
+
+## Using Helm
+Make sure that you have a K8s cluster up and running. Use the following command:
+```sh
+make helm-install
+```
+
 ## Contributing
 // TODO(user): Add detailed information on how you would like others to contribute to this project
 

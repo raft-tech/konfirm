@@ -1,0 +1,51 @@
+# Default values for konfirm.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+controller:
+  image: konfirm/controller
+  tag: "v0.1.0"
+  args: [--leader-elect]
+  pullPolicy: IfNotPresent
+  replicas: 1
+  imagePullSecrets: []
+  topologySpreadConstraints: []
+  health:
+    port: 8081
+  metrics:
+    address: 127.0.0.1
+    port: 8080
+  webhook:
+    port: 9443
+  leaderElection:
+    enabled: false
+    resource: d5d232eb.konfirm.goraft.tech
+  resources:
+    limits:
+      cpu: 500m
+      memory: 128Mi
+    requests:
+      cpu: 10m
+      memory: 64Mi
+
+service:
+  port: 8443
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  name: "konfirm-controller-manager"
+
+# deploys prometheus operator monitoring resources
+monitoring: false
+
+# enables istio sidecar injection into the namespace
+istio: false
+
+# enables webhooks in Konfirm CRD's
+webhook: false
+
+# enables certificate injection into Konfirm CRD's via certmanager
+certmanager: false

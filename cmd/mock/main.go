@@ -17,7 +17,6 @@
 package main
 
 import (
-	"io/ioutil"
 	"os"
 )
 
@@ -39,7 +38,7 @@ func main() {
 		message = argv[2]
 	}
 	if message != "" {
-		_ = ioutil.WriteFile("/dev/termination-log", []byte(message), 0644)
+		_ = os.WriteFile("/dev/termination-log", []byte(message), 0644)
 	}
 	os.Exit(exitCode)
 }

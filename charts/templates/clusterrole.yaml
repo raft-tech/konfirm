@@ -1,10 +1,19 @@
----
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   creationTimestamp: null
-  name: manager-role
+  name: konfirm-manager-role
+  labels:
+    {{- include "konfirm.labels" . | nindent 4 }}
 rules:
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - list
+  - get
+  - watch
 - apiGroups:
   - ""
   resources:
@@ -30,14 +39,6 @@ rules:
   - pods/status
   verbs:
   - get
-- apiGroups:
-  - ""
-  resources:
-  - secrets
-  verbs:
-  - get
-  - list
-  - watch
 - apiGroups:
   - konfirm.goraft.tech
   resources:
@@ -79,6 +80,14 @@ rules:
 - apiGroups:
   - konfirm.goraft.tech
   resources:
+  - helmpolicies
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - konfirm.goraft.tech
+  resources:
   - testsuites
   verbs:
   - get
@@ -93,3 +102,35 @@ rules:
   verbs:
   - get
   - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: konfirm-metrics-reader
+  labels:
+    {{- include "konfirm.labels" . | nindent 4 }}
+rules:
+- nonResourceURLs:
+  - /metrics
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: konfirm-proxy-role
+  labels:
+    {{- include "konfirm.labels" . | nindent 4 }}
+rules:
+- apiGroups:
+  - authentication.k8s.io
+  resources:
+  - tokenreviews
+  verbs:
+  - create
+- apiGroups:
+  - authorization.k8s.io
+  resources:
+  - subjectaccessreviews
+  verbs:
+  - create
