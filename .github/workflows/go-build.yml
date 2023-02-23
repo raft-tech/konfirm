@@ -76,3 +76,4 @@ jobs:
         with:
           push: true
           tags: konfirm:${{ env.RELEASE_VERSION }}
+          githubOrg: rafttech
