@@ -1,6 +1,7 @@
 name: Go Build
 
 on:
+  workflow_dispatch:
   push:
     branches: [ "develop" ]
     tags: [*]
