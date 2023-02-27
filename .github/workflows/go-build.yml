@@ -49,7 +49,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Set up QEMU  # Virtualization tool 
+      - name: Set up QEMU  # Virtualization tool  
         uses: docker/setup-qemu-action@v2
     
       - name: Set up Docker Buildx
