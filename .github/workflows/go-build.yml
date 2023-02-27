@@ -66,8 +66,7 @@ jobs:
         uses: docker/build-push-action@v4
         with:
           push: true
-          tags: konfirm:${{ github.sha }}
-          githubOrg: rafttech
+          tags: rafttech/konfirm:${{ github.sha }}
       - name: set RELEASE_VERSION 
         if: github.ref == 'refs/heads/main'
         run: echo "RELEASE_VERSION=${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
@@ -76,5 +75,4 @@ jobs:
         uses: docker/build-push-action@v4
         with:
           push: true
-          tags: konfirm:${{ env.RELEASE_VERSION }}
-          githubOrg: rafttech
+          tags: rafttech/konfirm:${{ env.RELEASE_VERSION }}
