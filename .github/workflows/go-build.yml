@@ -62,16 +62,16 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       
       - name: Build and push snapshot
-        if: github.ref != 'refs/heads/main'
+        if: github.event_name != 'release'
         uses: docker/build-push-action@v4
         with:
           push: true
           tags: rafttech/konfirm:${{ github.sha }}
       - name: set RELEASE_VERSION 
-        if: github.ref == 'refs/heads/main'
+        if: github.event_name == 'release'
         run: echo "RELEASE_VERSION=${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
       - name: Build and push release
-        if: env.RELEASE_VERSION != ''
+        if: github.event_name == 'release'
         uses: docker/build-push-action@v4
         with:
           push: true

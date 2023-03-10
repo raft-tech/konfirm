@@ -10,16 +10,30 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           fetch-depth: 0
-
-      - name: Configure Git
+      - uses: azure/setup-helm@v3
+        name: Setup Helm
+        with:
+          version: 'latest'
+          token: ${{ secrets.GHUB_TOKEN }} # only needed if version is 'latest'
+        id: install
+      - name: Package Helm Chart
         run: |
-          git config user.name "$GITHUB_ACTOR"
-          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
-
-      - name: Run chart-releaser
-        uses: helm/chart-releaser-action@v1.1.0
-        env:
-          CR_TOKEN: "${{ secrets.GHUB_TOKEN }}"
+          helm package ./charts/
+      - uses: actions/upload-artifact@v3
+        name: Upload Helm Chart Snapshot Version
+        if: github.event_name != 'release'
+        with:
+          name: konfirm-${{ github.sha }}.tgz
+          path: konfirm*.tgz
+      - name: Set env containing release tag
+        if: github.event_name == 'release'
+        run: echo "RELEASE_VERSION=${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
+      - uses: actions/upload-artifact@v3
+        name: Upload Helm Chart Release Version
+        if: github.event_name == 'release'
+        with:
+          name: konfirm-${{ env.RELEASE_VERSION }}.tgz
+          path: konfirm*.tgz
