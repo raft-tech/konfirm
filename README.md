@@ -48,15 +48,11 @@ UnDeploy the controller to the cluster:
 make undeploy
 ```
 
-
 ## Using Helm
 Make sure that you have a K8s cluster up and running. Use the following command:
 ```sh
 make helm-install
 ```
-
-## Contributing
-// TODO(user): Add detailed information on how you would like others to contribute to this project
 
 ### How it works
 This project aims to follow the Kubernetes [Operator pattern](https://kubernetes.io/docs/concepts/extend-kubernetes/operator/)
@@ -92,7 +88,7 @@ More information can be found via the [Kubebuilder Documentation](https://book.k
 
 ## License
 
-Copyright 2022 Raft, LLC
+Copyright 2023 Raft, LLC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.

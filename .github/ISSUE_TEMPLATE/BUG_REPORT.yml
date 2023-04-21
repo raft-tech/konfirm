@@ -1,0 +1,51 @@
+name: Report a Bug
+description: File a bug report
+title: "[Bug]: "
+labels: ["bug", "triage"]
+assignees:
+  - dagan
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for helping us make Konfirm better! Your contributions make the community stronger. 💪
+  - type: textarea
+    id: description
+    attributes:
+      label: What went wrong?
+      description: What happened (or didn't happen)? What did you expect?
+    validations:
+      required: true
+  - type: dropdown
+    id: version
+    attributes:
+      label: Version
+      description: What version of our software are you running?
+      options:
+        - v0.2.0 (Latest)
+    validations:
+      required: true
+  - type: dropdown
+    id: kubernetes-version
+    attributes:
+      label: What version of Kubernetes are you using?
+      multiple: true
+      options:
+        - v1.27
+        - v1.26
+        - v1.25
+        - v1.24
+        - Other
+  - type: textarea
+    id: kubernetes-details
+    attributes:
+      label: Which Kubernetes distribution are you using?
+      description: Are you using EKS, AKS, GKE, RKE2, something else? If not a supported version, what version are you using?
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Code of Conduct
+      description: By submitting this issue, you agree to follow our [Code of Conduct](https://github.com/raft-tech/konfirm/blob/develop/CODE_OF_CONDUCT.md)
+      options:
+        - label: I agree to follow the Konfirm Code of Conduct
+          required: true
