@@ -1,78 +1,90 @@
 name: Go Build
 
+permissions:
+  - read
+
 on:
-  workflow_dispatch:
   push:
-    branches: [ "develop" ]
-    tags: ["*"]
+    branches: ['develop']
+    tags: ['*']
   pull_request:
-    branches: [ "develop" ]
+    branches: ['develop']
 
 jobs:
-  Build:
+
+  Set Up:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
-          go-version: 'stable'
+          go-version: stable
       - name: Install Dependencies
         run: go get .
       - name: Verify
-        run: go vet ./...
+        run: make vet
+
   Test:
-    needs: Build
+    needs: 'Set Up'
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        k8s-version: ["1.22", "1.23", "1.24", "1.25"]
+        k8s-version: ['1.24', '1.25', '1.26', '1.27']
     env:
       ENVTEST_K8S_VERSION: ${{ matrix.k8s-version }}
     steps:
       - uses: actions/checkout@v3
       - name: Set up Go
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@v4
         with:
-          cache: true
-          go-version: 1.19
+          go-version: stable
       - name: Set up envtest
         run: |
           make envtest
           echo "KUBEBUILDER_ASSETS=$(bin/setup-envtest use $ENVTEST_K8S_VERSION -p path)" >> $GITHUB_ENV
       - name: Test
-        run: go test ./...
-  Release:
+        run: make test
+
+  Build:
     needs: Test
-    if: github.event_name == 'create' && startsWith(github.ref, '/refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: stable
+      - name: Build
+        run: make build
+      - name: Upload manager
+        uses: actions/upload-artifact@v3
+        with:
+          name: manager
+          path: manager
+          retention-days: 1
 
-      - name: Set up QEMU  # Virtualization tool  
-        uses: docker/setup-qemu-action@v2
-    
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-      
-      - name: Login to Docker Hub
-        uses: docker/login-action@v2
+  Scan:
+    needs: Build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Download manager
+        uses: actions/download-artifact@v3
+      - name: Scan with Trivy
+        uses: aquasecurity/trivy-action@master
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-      
-      - name: Build and push snapshot
-        if: startsWith(github.ref, 'refs/tags/v') != true
-        uses: docker/build-push-action@v4
+          scan-type: 'fs'
+          format: 'template'
+          template: '@/contrib/sarif.tpl'
+          output: 'trivy-results.sarif'
+          severity: 'MEDIUM,HIGH,CRITICAL'
+      - name: Upload scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v2
         with:
-          push: true
-          tags: rafttech/konfirm:${{ github.sha }}
-      - name: set RELEASE_VERSION 
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: echo "RELEASE_VERSION=${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
-      - name: Build and push release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: docker/build-push-action@v4
-        with:
-          push: true
-          tags: rafttech/konfirm:${{ env.RELEASE_VERSION }}
+          sarif_file: 'trivy-results.sarif'
