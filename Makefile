@@ -4,7 +4,7 @@ IMG ?= konfirm/controller:v0.1.0
 MOCK_IMG ?= konfirm/mock:v0.1.0
 
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
-ENVTEST_K8S_VERSION = 1.23
+ENVTEST_K8S_VERSION = 1.26
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -41,6 +41,11 @@ help: ## Display this help.
 
 ##@ Development
 
+.PHONY: clean
+clean:
+	[ ! -f "manager" ] || rm manager
+	[ ! -f "mock" ] || rm mock
+
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
 	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
@@ -59,28 +64,41 @@ vet: ## Run go vet against code.
 
 .PHONY: test
 test: manifests generate fmt vet envtest ## Run tests.
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" go test ./... -coverprofile cover.out
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" go test -test.v ./...
 
 ##@ Build
 
+manager: generate fmt vet
+	CGO_ENABLED=0 go build -o manager main.go
+
 .PHONY: build
-build: generate fmt vet ## Build manager binary.
-	go build -o bin/manager main.go
+build: manager ## Build manager binary.
+
+.PHONY: build-in-docker
+build-in-docker: generate fmt vet ## Build manager binary in docker
+	 docker run -e CGO_ENABLED=0 -e GOOS=linux -e GOARCH=amd64 -v $$(pwd):/workspace -w /workspace golang:1.20 go build -a -o manager main.go
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
 	go run ./main.go
 
+mock:
+	CGO_ENABLED=0 go build -o mock ./cmd/mock
+
 .PHONY: build-mock
-build-mock:
-	go build -o bin/mock ./cmd/mock
+build-mock: mock
+	go build -a -o mock ./cmd/mock
+
+.PHONY: build-mock-in-docker
+build-mock-in-docker:
+	docker run -e CGO_ENABLED=0 -e GOOS=linux -e GOARCH=amd64 -v $$(pwd):/workspace -w /workspace golang:1.20 go build -a -o mock ./cmd/mock
 
 .PHONY: docker-build
-docker-build: generate fmt vet ## Build docker image with the manager.
+docker-build: manager ## Build docker image with the manager.
 	docker build -t ${IMG} .
 
 .PHONY: docker-build-mock
-docker-build-mock: ## Build docker image with the mock
+docker-build-mock: mock ## Build docker image with the mock
 	docker build -t ${MOCK_IMG} -f ./images/mock.dockerfile .
 
 .PHONY: docker-push
