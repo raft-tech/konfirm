@@ -79,12 +79,12 @@ func (ic impersonatingClient) Impersonate(ctx context.Context, namespace string,
 	}
 
 	// Copy the rest.Config and add impersonation
-	config := *ic.config // Dereference original config to avoid reconfiguring other clients
+	config := rest.CopyConfig(ic.config)
 	if user := userRef.Spec.UserName; user != "" {
 		config.Impersonate.UserName = user
 	}
 
-	c, err := client.New(&config, ic.options)
+	c, err := client.New(config, ic.options)
 	if err != nil {
 		return nil, err
 	}

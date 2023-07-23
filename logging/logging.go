@@ -38,6 +38,10 @@ func NewLogger(from logr.Logger) *Logger {
 	}
 }
 
+func (l *Logger) DebugLogger() logr.Logger {
+	return l.debug
+}
+
 func (l *Logger) Debug(msg string, keysAndValues ...interface{}) {
 	l.debug.Info(msg, keysAndValues...)
 }
