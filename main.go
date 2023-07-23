@@ -74,8 +74,6 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	// TODO: Set impersonate.DefaultUserRef.Namespace to controller namespace
-
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme: scheme,
 		Metrics: metricsserver.Options{
@@ -103,7 +101,7 @@ func main() {
 		os.Exit(1)
 	}
 	if err = (&controllers.TestRunReconciler{
-		Client:          mgr.GetClient(),
+		Client:          mgr.GetClient().(impersonate.Client),
 		Scheme:          mgr.GetScheme(),
 		Recorder:        recorder,
 		ErrRequeueDelay: time.Minute,

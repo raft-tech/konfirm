@@ -22,10 +22,10 @@ import (
 
 // UserRefSpec defines the desired state of UserRef
 type UserRefSpec struct {
-
-	// UserName sets the username that will be impersonated when this UserRef
-	// is used.
-	UserName string `json:"username,omitempty"`
+	User   string              `json:"user,omitempty"`
+	UID    string              `json:"uid,omitempty"`
+	Groups []string            `json:"groups,omitempty"`
+	Extra  map[string][]string `json:"extra,omitempty"`
 }
 
 //+kubebuilder:object:root=true

@@ -2,11 +2,11 @@ package impersonate
 
 import (
 	"context"
+	"errors"
 	konfirm "github.com/raft-tech/konfirm/api/v1alpha1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
-	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -19,28 +19,16 @@ var (
 
 type Client interface {
 	client.Client
-	Impersonate(ctx context.Context, namespace string, name string) (client.Client, error)
+	Impersonate(ctx context.Context, namespace string, name string) (Client, error)
 }
 
 // NewImpersonatingClient creates a caching impersonatingClient with support for impersonation
-func NewImpersonatingClient(cache cache.Cache, config *rest.Config, options client.Options, uncachedObjects ...client.Object) (client.Client, error) {
-
-	c, err := client.New(config, options)
-	if err != nil {
-		return nil, err
-	}
-
-	if dc, err := client.NewDelegatingClient(client.NewDelegatingClientInput{
-		CacheReader:     cache,
-		Client:          c,
-		UncachedObjects: uncachedObjects,
-	}); err == nil {
+func NewImpersonatingClient(config *rest.Config, options client.Options) (client.Client, error) {
+	if c, err := client.New(config, options); err == nil {
 		return &impersonatingClient{
-			Client:          dc,
-			cache:           cache,
-			config:          config,
-			options:         options,
-			uncachedObjects: uncachedObjects,
+			Client:  c,
+			config:  config,
+			options: options,
 		}, nil
 	} else {
 		return nil, err
@@ -49,18 +37,23 @@ func NewImpersonatingClient(cache cache.Cache, config *rest.Config, options clie
 
 type impersonatingClient struct {
 	client.Client
-	cache           cache.Cache
-	config          *rest.Config
-	options         client.Options
-	uncachedObjects []client.Object
+	config  *rest.Config
+	options client.Options
 }
 
-func (ic impersonatingClient) Impersonate(ctx context.Context, namespace string, name string) (client.Client, error) {
+// Impersonate returns a client.Client configured to impersonate the specified api.UserRef.
+// namespace is required. If name is empty, the default UserRef name will be used
+// (generally "default"). If name is empty and the default UserRef is not found in the
+// specified namespace, the default UserRef will be used (generally, "konfirm-system/default".)
+func (ic *impersonatingClient) Impersonate(ctx context.Context, namespace string, name string) (Client, error) {
 
 	// Default to "default" userRefName if not explicitly set
 	userRefName := types.NamespacedName{
 		Namespace: namespace,
 		Name:      name,
+	}
+	if userRefName.Namespace == "" {
+		return nil, errors.New("namespace must not be empty")
 	}
 	if userRefName.Name == "" {
 		userRefName.Name = DefaultUserRef.Name
@@ -70,37 +63,29 @@ func (ic impersonatingClient) Impersonate(ctx context.Context, namespace string,
 	var userRef konfirm.UserRef
 	if err := ic.Get(ctx, userRefName, &userRef); err != nil {
 		if apierrors.IsNotFound(err) && name == "" {
+			// Name was explicitly omitted, so the system default can be used
 			if err = ic.Get(ctx, DefaultUserRef, &userRef); err != nil {
-				return nil, err
+				return nil, errors.New("default UserRef not found")
 			}
 		} else {
-			return nil, err
+			return nil, errors.Join(errors.New("error retrieving specified UserRef"), err)
 		}
 	}
 
 	// Copy the rest.Config and add impersonation
 	config := rest.CopyConfig(ic.config)
-	if user := userRef.Spec.UserName; user != "" {
-		config.Impersonate.UserName = user
+	config.Impersonate = rest.ImpersonationConfig{
+		UserName: userRef.Spec.User,
+		UID:      userRef.Spec.UID,
+		Groups:   userRef.Spec.Groups,
+		Extra:    userRef.Spec.Extra,
 	}
 
-	c, err := client.New(config, ic.options)
-	if err != nil {
-		return nil, err
-	}
-
-	// Create a new impersonatingClient but maintain a reference to the original config
-	if dc, err := client.NewDelegatingClient(client.NewDelegatingClientInput{
-		CacheReader:     ic.cache,
-		Client:          c,
-		UncachedObjects: ic.uncachedObjects,
-	}); err == nil {
+	if _client, err := client.New(config, ic.options); err == nil {
 		return &impersonatingClient{
-			Client:          dc,
-			cache:           ic.cache,
-			config:          ic.config,
-			options:         ic.options,
-			uncachedObjects: ic.uncachedObjects,
+			Client:  _client,
+			config:  config,
+			options: ic.options,
 		}, nil
 	} else {
 		return nil, err

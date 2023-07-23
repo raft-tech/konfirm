@@ -182,7 +182,7 @@ func setUpDefaultUserRef(ctx context.Context, k8sClient client.Client) {
 			Name:      impersonate.DefaultUserRef.Name,
 		},
 		Spec: konfirmv1alpha1.UserRefSpec{
-			UserName: "konfirm-tester",
+			User: "konfirm-tester",
 		},
 	}
 	err = k8sClient.Create(ctx, &defaultUserRef)
@@ -209,7 +209,7 @@ func setUpDefaultUserRef(ctx context.Context, k8sClient client.Client) {
 			{
 				APIGroup: "rbac.authorization.k8s.io",
 				Kind:     "User",
-				Name:     defaultUserRef.Spec.UserName,
+				Name:     defaultUserRef.Spec.User,
 			},
 		},
 		RoleRef: rbac.RoleRef{

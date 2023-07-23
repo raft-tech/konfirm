@@ -173,7 +173,6 @@ func (r *TestSuiteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// Handle errors
-	
 
 	// Handle changes to scheduling
 	if sched := testSuite.Spec.When.Schedule; sched != "" {
@@ -715,26 +714,29 @@ func (r *TestSuiteReconciler) doSetUp(ctx context.Context, testSuite *konfirm.Te
 		return true
 	}
 
-	logger := logging.FromContextWithName(ctx, testSuiteControllerLoggerName)
-	var err error
+	panic("not implemented")
 
-	// Get impersonator
-	var user client.Client
-	logger.Trace("initiating impersonation")
-	if user, err = r.Impersonate(ctx, testSuite.Namespace, testSuite.Spec.RunAs); err != nil {
-		logger.Error(err, "error initializing impersonation")
-		return false
-	}
-	logger.Debug("impersonation initialized")
-
-	// Get the Helm secret
-	if name := testSuite.Spec.SetUp.Helm.SecretName; name != "" {
-		secret := v1.Secret{}
-		if err :=
-	} else {
-		return true
-	}
-	return
+	//logger := logging.FromContextWithName(ctx, testSuiteControllerLoggerName)
+	//var err error
+	//
+	//// Get impersonator
+	//var user client.Client
+	//logger.Trace("initiating impersonation")
+	//if user, err = r.Impersonate(ctx, testSuite.Namespace, testSuite.Spec.RunAs); err != nil {
+	//	logger.Error(err, "error initializing impersonation")
+	//	return false
+	//}
+	//logger.Debug("impersonation initialized")
+	//
+	//// Get the Helm secret
+	//if name := testSuite.Spec.SetUp.Helm.SecretName; name != "" {
+	//	secret := v1.Secret{}
+	//	if err :=
+	//} else {
+	//	return true
+	//}
+	//
+	//return
 }
 
 // doTearDown performs any required teardown and returns true w

@@ -35,9 +35,19 @@ spec:
           spec:
             description: UserRefSpec defines the desired state of UserRef
             properties:
-              username:
-                description: UserName sets the username that will be impersonated
-                  when this UserRef is used.
+              extra:
+                additionalProperties:
+                  items:
+                    type: string
+                  type: array
+                type: object
+              groups:
+                items:
+                  type: string
+                type: array
+              uid:
+                type: string
+              user:
                 type: string
             type: object
         type: object
