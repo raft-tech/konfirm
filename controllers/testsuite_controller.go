@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sort"
 	"strings"
 	"time"
@@ -37,10 +38,8 @@ import (
 	"k8s.io/utils/clock"
 	"k8s.io/utils/strings/slices"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
-	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
 const (
@@ -710,6 +709,6 @@ func (r *TestSuiteReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		// Uncomment the following line adding a pointer to an instance of the controlled resource as an argument
 		For(&konfirm.TestSuite{}).
 		Owns(&konfirm.TestRun{}).
-		Watches(&source.Kind{Type: &v1.Secret{}}, &EnqueueForHelmTrigger{Client: mgr.GetClient()}, builder.WithPredicates(&IsHelmRelease{})).
+		Watches(&v1.Secret{}, &EnqueueForHelmTrigger{Client: mgr.GetClient()}, builder.WithPredicates(&IsHelmRelease{})).
 		Complete(r)
 }

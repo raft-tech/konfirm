@@ -69,19 +69,19 @@ type EnqueueForHelmTrigger struct {
 	client.Client
 }
 
-func (h *EnqueueForHelmTrigger) Create(e event.CreateEvent, q workqueue.RateLimitingInterface) {
-	h.handle(e.Object, q)
+func (h *EnqueueForHelmTrigger) Create(ctx context.Context, e event.CreateEvent, q workqueue.RateLimitingInterface) {
+	h.handle(ctx, e.Object, q)
 }
 
-func (h *EnqueueForHelmTrigger) Update(e event.UpdateEvent, q workqueue.RateLimitingInterface) {
+func (h *EnqueueForHelmTrigger) Update(ctx context.Context, e event.UpdateEvent, q workqueue.RateLimitingInterface) {
 	return
 }
 
-func (h *EnqueueForHelmTrigger) Delete(e event.DeleteEvent, q workqueue.RateLimitingInterface) {
+func (h *EnqueueForHelmTrigger) Delete(ctx context.Context, e event.DeleteEvent, q workqueue.RateLimitingInterface) {
 	return
 }
 
-func (h *EnqueueForHelmTrigger) Generic(e event.GenericEvent, q workqueue.RateLimitingInterface) {
+func (h *EnqueueForHelmTrigger) Generic(ctx context.Context, e event.GenericEvent, q workqueue.RateLimitingInterface) {
 	return
 }
 
@@ -89,9 +89,8 @@ func (h *EnqueueForHelmTrigger) Generic(e event.GenericEvent, q workqueue.RateLi
 // TestSuites for reconciliation. TestSuites outside the Helm Release's own
 // namespace must match an explicitly defined HelmPolicy (named for the release)
 // to be enqueued for reconciliation.
-func (h *EnqueueForHelmTrigger) handle(obj client.Object, q workqueue.RateLimitingInterface) {
+func (h *EnqueueForHelmTrigger) handle(ctx context.Context, obj client.Object, q workqueue.RateLimitingInterface) {
 
-	ctx := context.TODO()
 	logger := logging.FromContextWithName(ctx, "helmrelease-watcher", "namespace", obj.GetNamespace(), "secret", obj.GetName())
 
 	// Parse the Helm release secret
