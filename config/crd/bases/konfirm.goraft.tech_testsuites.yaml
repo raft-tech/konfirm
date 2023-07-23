@@ -53,11 +53,7 @@ spec:
                   helm:
                     description: TestSuiteHelmSetUp describes a Secret-embedded
                     properties:
-                      chartKey:
-                        type: string
                       secret:
-                        type: string
-                      valuesKey:
                         type: string
                     type: object
                 type: object

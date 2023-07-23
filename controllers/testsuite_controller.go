@@ -172,6 +172,9 @@ func (r *TestSuiteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		logger.Debug("added finalizer")
 	}
 
+	// Handle errors
+	
+
 	// Handle changes to scheduling
 	if sched := testSuite.Spec.When.Schedule; sched != "" {
 		if sched != testSuite.Annotations[TestSuiteScheduleAnnotation] {
@@ -705,8 +708,32 @@ func (r *TestSuiteReconciler) isRunning(ctx context.Context, testSuite *konfirm.
 
 // doSetUp performs any required setup and returns true when all set up
 // is complete. An error is returned if set up cannot be performed.
-func (r *TestSuiteReconciler) doSetUp(ctx context.Context, testSuite *konfirm.TestSuite) (ok bool) {
-	ok = true
+func (r *TestSuiteReconciler) doSetUp(ctx context.Context, testSuite *konfirm.TestSuite) bool {
+
+	// Return early if no set up
+	if testSuite.Spec.SetUp.Helm.SecretName == "" {
+		return true
+	}
+
+	logger := logging.FromContextWithName(ctx, testSuiteControllerLoggerName)
+	var err error
+
+	// Get impersonator
+	var user client.Client
+	logger.Trace("initiating impersonation")
+	if user, err = r.Impersonate(ctx, testSuite.Namespace, testSuite.Spec.RunAs); err != nil {
+		logger.Error(err, "error initializing impersonation")
+		return false
+	}
+	logger.Debug("impersonation initialized")
+
+	// Get the Helm secret
+	if name := testSuite.Spec.SetUp.Helm.SecretName; name != "" {
+		secret := v1.Secret{}
+		if err :=
+	} else {
+		return true
+	}
 	return
 }
 
