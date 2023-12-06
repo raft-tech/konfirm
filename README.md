@@ -9,7 +9,7 @@ With Konfirm, in-cluster integration testing is as simple as:
  2. Defining your tests in a Konfirm TestSuite Custom Resource.  
  3. Associating your TestSuite with a Konfirm Trigger.  
 
-When the trigger action is observed, Konfirm initiates your TestSuite, executing each integration test in a separte Pod. When the Pod completes, its exit code is used to determine Pass or Fail, and its termination message is retrieved. Test results are published as Prometheus metrics, allowing you to integrate Konfirm into your existing monitoring and alerting strategy.
+When the trigger action is observed, Konfirm initiates your TestSuite, executing each integration test in a separate Pod. When the Pod completes, its exit code is used to determine Pass or Fail, and its termination message is retrieved. Test results are published as Prometheus metrics, allowing you to integrate Konfirm into your existing monitoring and alerting strategy.
 
 ## Getting Started
 You’ll need a Kubernetes cluster to run against. You can use [KIND](https://sigs.k8s.io/kind) to get a local cluster for testing, or run against a remote cluster.
