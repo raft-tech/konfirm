@@ -21,7 +21,7 @@ jobs:
         with:
           go-version: stable
       - name: Install Dependencies
-        run: go get .
+        run: go mod download
 
   Test:
     needs: Setup
