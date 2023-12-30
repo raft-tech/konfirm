@@ -21,21 +21,20 @@ import (
 	"os"
 	"time"
 
+	"github.com/raft-tech/konfirm/logging"
 	"github.com/robfig/cron/v3"
 	"k8s.io/utils/clock"
-
-	"github.com/raft-tech/konfirm/logging"
-
-	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
-	// to ensure that exec-entrypoint and run can make use of them.
-	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
+	// to ensure that exec-entrypoint and run can make use of them.
+	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	konfirmv1alpha1 "github.com/raft-tech/konfirm/api/v1alpha1"
 	"github.com/raft-tech/konfirm/controllers"
@@ -75,9 +74,10 @@ func main() {
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
-		Scheme:                 scheme,
-		MetricsBindAddress:     metricsAddr,
-		Port:                   9443,
+		Scheme: scheme,
+		Metrics: metricsserver.Options{
+			BindAddress: metricsAddr,
+		},
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "1337e21f.goraft.tech",
@@ -88,13 +88,14 @@ func main() {
 	}
 
 	recorder := mgr.GetEventRecorderFor("konfirm")
+	errMsg := "unable to create controller"
 	if err = (&controllers.TestReconciler{
 		Client:          mgr.GetClient(),
 		Scheme:          mgr.GetScheme(),
 		Recorder:        recorder,
 		ErrRequeueDelay: time.Minute,
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "Test")
+		setupLog.Error(err, errMsg, "controller", "Test")
 		os.Exit(1)
 	}
 	if err = (&controllers.TestRunReconciler{
@@ -103,7 +104,7 @@ func main() {
 		Recorder:        recorder,
 		ErrRequeueDelay: time.Minute,
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "TestRun")
+		setupLog.Error(err, errMsg, "controller", "TestRun")
 		os.Exit(1)
 	}
 	if err = (&controllers.TestSuiteReconciler{
@@ -114,7 +115,7 @@ func main() {
 		CronParser:      cron.ParseStandard,
 		Clock:           clock.RealClock{},
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "TestSuite")
+		setupLog.Error(err, errMsg, "controller", "TestSuite")
 		os.Exit(1)
 	}
 	//+kubebuilder:scaffold:builder

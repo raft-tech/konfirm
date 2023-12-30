@@ -1,10 +1,11 @@
 
 # Image URL to use all building/pushing image targets
-IMG ?= konfirm/controller:v0.1.0
-MOCK_IMG ?= konfirm/mock:v0.1.0
+KONFIRM_VERSION := $(shell cat VERSION)
+IMG ?= konfirm/controller:v$(KONFIRM_VERSION)
+MOCK_IMG ?= konfirm/mock:v$(KONFIRM_VERSION)
 
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
-ENVTEST_K8S_VERSION = 1.26
+ENVTEST_K8S_VERSION = 1.28
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -76,7 +77,7 @@ build: manager ## Build manager binary.
 
 .PHONY: build-in-docker
 build-in-docker: generate fmt vet ## Build manager binary in docker
-	 docker run -e CGO_ENABLED=0 -e GOOS=linux -e GOARCH=amd64 -v $$(pwd):/workspace -w /workspace golang:1.20 go build -a -o manager main.go
+	 docker run -e CGO_ENABLED=0 -e GOOS=linux -e GOARCH=amd64 -v $$(pwd):/workspace -w /workspace golang:1.21 go build -a -o manager main.go
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
@@ -91,7 +92,7 @@ build-mock: mock
 
 .PHONY: build-mock-in-docker
 build-mock-in-docker:
-	docker run -e CGO_ENABLED=0 -e GOOS=linux -e GOARCH=amd64 -v $$(pwd):/workspace -w /workspace golang:1.20 go build -a -o mock ./cmd/mock
+	docker run -e CGO_ENABLED=0 -e GOOS=linux -e GOARCH=amd64 -v $$(pwd):/workspace -w /workspace golang:1.21 go build -a -o mock ./cmd/mock
 
 .PHONY: docker-build
 docker-build: manager ## Build docker image with the manager.
