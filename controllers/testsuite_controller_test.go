@@ -19,7 +19,9 @@ package controllers_test
 import (
 	"context"
 	"fmt"
-	. "github.com/onsi/ginkgo"
+	"time"
+
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	konfirm "github.com/raft-tech/konfirm/api/v1alpha1"
 	"github.com/raft-tech/konfirm/controllers"
@@ -30,7 +32,6 @@ import (
 	"k8s.io/utils/clock"
 	tclock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"time"
 )
 
 var _ = Describe("TestSuite Controller", func() {
@@ -43,9 +44,9 @@ var _ = Describe("TestSuite Controller", func() {
 		testSuite *konfirm.TestSuite
 	)
 
-	BeforeEach(func() {
+	BeforeEach(func(sctx context.Context) {
 
-		ctx = context.Background()
+		ctx = sctx
 
 		if ns, err := generateNamespace(); err == nil {
 			namespace = ns

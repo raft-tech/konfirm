@@ -75,8 +75,6 @@ type TestSuiteTriggers struct {
 // TestSuiteHelmSetUp describes a Secret-embedded
 type TestSuiteHelmSetUp struct {
 	SecretName string `json:"secret,omitempty"`
-	ChartKey   string `json:"chartKey,omitempty"`
-	ValuesKey  string `json:"valuesKey,omitempty"`
 }
 
 // TestSuiteSetUp describes any setup that should occur before the Tests are run

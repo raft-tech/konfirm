@@ -19,18 +19,20 @@ package controllers
 import (
 	"context"
 	"fmt"
-	"github.com/davecgh/go-spew/spew"
-	konfirm "github.com/raft-tech/konfirm/api/v1alpha1"
 	"hash/fnv"
-	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/rand"
 	"math"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/davecgh/go-spew/spew"
+	konfirm "github.com/raft-tech/konfirm/api/v1alpha1"
+	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/rand"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
@@ -38,13 +40,10 @@ const (
 )
 
 // getCondition returns the specified condition if it exists in the provided slice.
+// Deprecated: use meta.FindStatusCondition instead.
 func getCondition(condition string, from []metav1.Condition) (*metav1.Condition, bool) {
-	for _, c := range from {
-		if c.Type == condition {
-			return &c, true
-		}
-	}
-	return nil, false
+	c := meta.FindStatusCondition(from, condition)
+	return c, c != nil
 }
 
 // hasCondition returns true if the specified Condition exists in the provided

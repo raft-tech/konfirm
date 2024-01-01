@@ -21,6 +21,10 @@ import (
 	"strings"
 )
 
+var (
+	ErrResourceNotFound = errors.New("specified resource not found")
+)
+
 type ErrorList struct {
 	errors []error
 }

@@ -19,8 +19,13 @@ package controllers_test
 import (
 	"context"
 	"errors"
-	. "github.com/onsi/ginkgo"
-	"github.com/onsi/ginkgo/config"
+	"math"
+	"math/rand"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	konfirmv1alpha1 "github.com/raft-tech/konfirm/api/v1alpha1"
 	"github.com/raft-tech/konfirm/controllers"
@@ -34,17 +39,11 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/clock"
-	"math"
-	"math/rand"
-	"os"
-	"path/filepath"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
-	"strings"
-	"testing"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -63,12 +62,7 @@ var (
 
 func TestAPIs(t *testing.T) {
 	RegisterFailHandler(Fail)
-	origConifg := config.DefaultReporterConfig
-	if v := os.Getenv("GINGKO_VERBOSE"); v != "" {
-		config.DefaultReporterConfig.Verbose = true
-	}
 	RunSpecs(t, "Controller Suite")
-	config.DefaultReporterConfig = origConifg
 }
 
 var _ = BeforeSuite(func() {
@@ -160,7 +154,7 @@ var _ = BeforeSuite(func() {
 	// Seeded randomness generator
 	trand = rand.New(rand.NewSource(GinkgoRandomSeed()))
 
-}, 60)
+})
 
 func setUpDefaultUserRef(ctx context.Context, k8sClient client.Client) {
 

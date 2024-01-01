@@ -3,6 +3,7 @@ package impersonate
 import (
 	"context"
 	"errors"
+
 	konfirm "github.com/raft-tech/konfirm/api/v1alpha1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
@@ -15,10 +16,13 @@ var (
 		Namespace: "konfirm-system",
 		Name:      "default",
 	}
+
+	ErrUserRefNotFound = errors.New("UserRef not found")
 )
 
 type Client interface {
 	client.Client
+	Config() *rest.Config
 	Impersonate(ctx context.Context, namespace string, name string) (Client, error)
 }
 
@@ -39,6 +43,10 @@ type impersonatingClient struct {
 	client.Client
 	config  *rest.Config
 	options client.Options
+}
+
+func (ic *impersonatingClient) Config() *rest.Config {
+	return rest.CopyConfig(ic.config)
 }
 
 // Impersonate returns a client.Client configured to impersonate the specified api.UserRef.
@@ -63,9 +71,9 @@ func (ic *impersonatingClient) Impersonate(ctx context.Context, namespace string
 	var userRef konfirm.UserRef
 	if err := ic.Get(ctx, userRefName, &userRef); err != nil {
 		if apierrors.IsNotFound(err) && name == "" {
-			// Name was explicitly omitted, so the system default can be used
+			// ReleaseName was explicitly omitted, so the system default can be used
 			if err = ic.Get(ctx, DefaultUserRef, &userRef); err != nil {
-				return nil, errors.New("default UserRef not found")
+				return nil, ErrUserRefNotFound
 			}
 		} else {
 			return nil, errors.Join(errors.New("error retrieving specified UserRef"), err)

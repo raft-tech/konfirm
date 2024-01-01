@@ -2,143 +2,169 @@ package setup
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"os"
+	"path"
+	"time"
+
+	"github.com/raft-tech/konfirm/internal/utils"
 	"github.com/raft-tech/konfirm/logging"
 	helm "helm.sh/helm/v3/pkg/action"
+	"helm.sh/helm/v3/pkg/chart"
+	"helm.sh/helm/v3/pkg/chart/loader"
+	helmcli "helm.sh/helm/v3/pkg/cli"
+	"helm.sh/helm/v3/pkg/downloader"
+	"helm.sh/helm/v3/pkg/getter"
+	"helm.sh/helm/v3/pkg/release"
+	"helm.sh/helm/v3/pkg/storage/driver"
 	"k8s.io/apimachinery/pkg/api/meta"
-	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/discovery"
-	"k8s.io/client-go/discovery/cached/memory"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 )
 
-type HelmInstallInput struct {
-	types.NamespacedName
-	ChartUrl string
-	Username string
-	Password string
-	Values   map[string]interface{}
-}
-
-type HelmRelease struct{}
-
 type HelmClient interface {
-	Install(ctx context.Context, config HelmInstallInput) (*HelmRelease, error)
-	Uninstall(ctx context.Context, release *HelmRelease) error
+	Install(ctx context.Context, config HelmReleaseParams) (*release.Release, error)
+	Uninstall(ctx context.Context, release string) error
 }
 
-func NewHelmClient(namespace string, cfg *rest.Config, mapper meta.RESTMapper, logger logging.Logger) (HelmClient, error) {
-	debugLogger := logger.DebugLogger().WithName("helm").WithCallDepth(1)
-	debugFunc := func(format string, v ...interface{}) {
-		if debugLogger.Enabled() {
-			debugLogger.Info(fmt.Sprintf(format, v...))
-		}
+type HelmClientOptions struct {
+	HelmDriver       string // Defaults to secrets if left empty
+	ReleaseNamespace string
+	RESTMapper       meta.RESTMapper
+	RESTConfig       *rest.Config
+	Settings         *helmcli.EnvSettings
+	WorkDir          string
+}
+
+func NewHelmClient(opt HelmClientOptions) (HelmClient, error) {
+	hc := &helmClient{
+		config:    &helm.Configuration{},
+		settings:  opt.Settings,
+		namespace: opt.ReleaseNamespace,
+		workDir:   opt.WorkDir,
 	}
-	config := &helm.Configuration{}
-	if err := config.Init(&restClientGetter{config: cfg, restMapper: mapper}, namespace, "", debugFunc); err != nil {
+	if hc.settings == nil {
+		hc.settings = helmcli.New()
+	}
+	if hc.workDir == "" {
+		hc.workDir = os.TempDir()
+	}
+	if err := hc.config.Init(&restClientGetter{config: opt.RESTConfig, restMapper: opt.RESTMapper}, opt.ReleaseNamespace, opt.HelmDriver, hc.log); err != nil {
 		return nil, err
 	}
+	return hc, nil
+}
 
-	return &helmClient{config: config}, nil
+type HelmReleaseParams struct {
+	ReleaseName string
+	Values      map[string]any
+	Chart       ChartRef
+}
+
+type ChartRef struct {
+	URL      string
+	Username string
+	Password string
 }
 
 type helmClient struct {
-	config *helm.Configuration
+	config    *helm.Configuration
+	settings  *helmcli.EnvSettings
+	logger    *logging.Logger
+	namespace string
+	workDir   string
 }
 
-func (h helmClient) Install(ctx context.Context, config HelmInstallInput) (*HelmRelease, error) {
-	//TODO implement me
-	panic("implement me")
+func (h *helmClient) initLogger(ctx context.Context, kv ...any) {
+	h.logger = logging.FromContextWithName(ctx, "helm", kv...).WithCallDepth(2)
 }
 
-func (h helmClient) Uninstall(ctx context.Context, release *HelmRelease) error {
-	//TODO implement me
-	panic("implement me")
-}
-
-type restClientGetter struct {
-	config     *rest.Config
-	restMapper meta.RESTMapper
-}
-
-func (r restClientGetter) ToRESTConfig() (*rest.Config, error) {
-	return r.config, nil
-}
-
-func (r restClientGetter) ToDiscoveryClient() (discovery.CachedDiscoveryInterface, error) {
-	if dc, err := discovery.NewDiscoveryClientForConfig(r.config); err == nil {
-		return memory.NewMemCacheClient(dc), nil
-	} else {
-		return nil, err
+func (h *helmClient) log(str string, v ...any) {
+	if l := h.logger; l != nil && l.Enabled() {
+		h.logger.Info(fmt.Sprintf(str, v...))
 	}
 }
+func (h *helmClient) Install(ctx context.Context, params HelmReleaseParams) (*release.Release, error) {
 
-func (r restClientGetter) ToRESTMapper() (meta.RESTMapper, error) {
-	return r.restMapper, nil
-}
+	h.initLogger(ctx, "releaseNamespace", h.namespace, "release", params.ReleaseName)
 
-func (r restClientGetter) ToRawKubeConfigLoader() clientcmd.ClientConfig {
-
-	// This is based on the behavior of genericclioptions.ConfigFlags.ToRawKubeConfigLoader
-
-	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
-	loadingRules.DefaultClientConfig = &clientcmd.DefaultClientConfig
-
-	overrides := &clientcmd.ConfigOverrides{ClusterDefaults: clientcmd.ClusterDefaults}
-
-	if v := r.config.CertFile; v != "" {
-		overrides.AuthInfo.ClientCertificate = v
+	// Ensure an empty working dir is available
+	h.logger.Debug("initializing release working dir")
+	dir := path.Join(h.workDir, h.namespace+"-"+params.ReleaseName)
+	if e := os.RemoveAll(dir); e != nil {
+		return nil, utils.WrapError(e, "error cleaning release directory")
 	}
-
-	if v := r.config.KeyFile; v != "" {
-		overrides.AuthInfo.ClientKey = v
+	if e := os.Mkdir(dir, 0755); e != nil {
+		return nil, utils.WrapError(e, "error creating release directory")
 	}
-
-	if v := r.config.BearerTokenFile; v != "" {
-		overrides.AuthInfo.TokenFile = v
-	} else if v = r.config.BearerToken; v != "" {
-		overrides.AuthInfo.Token = v
-	}
-
-	if v := r.config.Impersonate.UserName; v != "" {
-		overrides.AuthInfo.Impersonate = v
-	}
-
-	if v := r.config.Impersonate.UID; v != "" {
-		overrides.AuthInfo.ImpersonateUID = v
-	}
-
-	if v := r.config.Impersonate.Groups; v != nil {
-		overrides.AuthInfo.ImpersonateGroups = make([]string, len(v))
-		copy(overrides.AuthInfo.ImpersonateGroups, v)
-	}
-
-	if v := r.config.Username; v != "" {
-		overrides.AuthInfo.Username = v
-	}
-
-	if v := r.config.Password; v != "" {
-		overrides.AuthInfo.Password = v
-	}
-
-	if v := r.config.Host; v != "" {
-		overrides.ClusterInfo.Server = v
-		if v = r.config.APIPath; v != "" {
-			overrides.ClusterInfo.Server += v
+	defer func() {
+		if e := os.RemoveAll(dir); e != nil {
+			h.logger.Error(e, "error removing working dir")
 		}
+	}()
+
+	// Pull the chart
+	h.logger.Debug("pulling chart")
+	var cchart *chart.Chart
+	if p, e := h.Pull(ctx, params.Chart, dir); e == nil {
+		if cchart, e = loader.Load(p); e != nil {
+			return nil, utils.WrapError(e, "error pulling chart")
+		}
+	} else {
+		return nil, utils.WrapError(e, "error pulling chart")
 	}
 
-	if v := r.config.ServerName; v != "" {
-		overrides.ClusterInfo.TLSServerName = v
+	// Ensure any existing releases are removed
+	if err := h.Uninstall(ctx, params.ReleaseName); err != nil {
+		return nil, utils.WrapError(err, "error uninstalling existing release")
 	}
 
-	if v := r.config.CAFile; v != "" {
-		overrides.ClusterInfo.CertificateAuthority = v
+	// Install the release
+	i := helm.NewInstall(h.config)
+	i.ReleaseName = params.ReleaseName
+	if params.ReleaseName == "" {
+		i.GenerateName = true
+	}
+	i.Namespace = h.namespace
+	i.Wait = true
+	i.WaitForJobs = true
+	i.Timeout = 300 * time.Second
+
+	return i.RunWithContext(ctx, cchart, params.Values)
+}
+
+func (h *helmClient) Pull(ctx context.Context, ref ChartRef, dst string) (string, error) {
+
+	dl := downloader.ChartDownloader{
+		Out:     io.Discard,
+		Verify:  downloader.VerifyNever,
+		Getters: getter.All(h.settings),
+		Options: []getter.Option{
+			getter.WithBasicAuth(ref.Username, ref.Password),
+		},
 	}
 
-	overrides.ClusterInfo.InsecureSkipTLSVerify = r.config.Insecure
-	overrides.Timeout = r.config.Timeout.String()
+	if out, _, err := dl.DownloadTo(ref.URL, "", dst); err == nil {
+		return out, nil
+	} else {
+		return "", err
+	}
+}
 
-	return clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, overrides)
+func (h *helmClient) Uninstall(ctx context.Context, release string) error {
+	h.initLogger(ctx, "releaseNamespace", h.namespace, "release", release)
+	ui := helm.NewUninstall(h.config)
+	ui.KeepHistory = false
+	ui.Wait = true
+	ui.Timeout = 300 * time.Second
+	h.logger.Debug("uninstalling release if present")
+	if res, err := ui.Run(release); err == nil {
+		h.logger.Info("uninstalled release", "version", res.Release.Version)
+	} else if errors.Is(err, driver.ErrReleaseNotFound) {
+		h.logger.Info("release not found")
+	} else {
+		return utils.WrapError(err, "error uninstalling release")
+	}
+	return nil
 }
