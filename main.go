@@ -38,6 +38,7 @@ import (
 
 	konfirmv1alpha1 "github.com/raft-tech/konfirm/api/v1alpha1"
 	"github.com/raft-tech/konfirm/controllers"
+	"github.com/raft-tech/konfirm/internal/impersonate"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -48,28 +49,41 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-
 	utilruntime.Must(konfirmv1alpha1.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
 }
 
 func main() {
+
 	var metricsAddr string
-	var enableLeaderElection bool
-	var probeAddr string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
-	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
+
+	var enableLeaderElection bool
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
+
+	var helmDir string
+	flag.StringVar(&helmDir, "helm-dir", "", "Helm data directory. Defaults to current working dir.")
+
+	var probeAddr string
+	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
+
 	opts := zap.Options{
 		EncoderConfigOptions: []zap.EncoderConfigOption{
 			logging.EncoderLevelConfig(logging.LowercaseLevelEncoder),
 		},
 	}
-
 	opts.BindFlags(flag.CommandLine)
+
 	flag.Parse()
+
+	if helmDir == "" {
+		helmDir = "."
+		if d, e := os.Getwd(); e == nil {
+			helmDir = d
+		}
+	}
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
@@ -81,6 +95,7 @@ func main() {
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "1337e21f.goraft.tech",
+		NewClient:              impersonate.NewImpersonatingClient,
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
@@ -90,7 +105,7 @@ func main() {
 	recorder := mgr.GetEventRecorderFor("konfirm")
 	errMsg := "unable to create controller"
 	if err = (&controllers.TestReconciler{
-		Client:          mgr.GetClient(),
+		Client:          mgr.GetClient().(impersonate.Client),
 		Scheme:          mgr.GetScheme(),
 		Recorder:        recorder,
 		ErrRequeueDelay: time.Minute,
@@ -99,7 +114,7 @@ func main() {
 		os.Exit(1)
 	}
 	if err = (&controllers.TestRunReconciler{
-		Client:          mgr.GetClient(),
+		Client:          mgr.GetClient().(impersonate.Client),
 		Scheme:          mgr.GetScheme(),
 		Recorder:        recorder,
 		ErrRequeueDelay: time.Minute,
@@ -108,12 +123,13 @@ func main() {
 		os.Exit(1)
 	}
 	if err = (&controllers.TestSuiteReconciler{
-		Client:          mgr.GetClient(),
+		Client:          mgr.GetClient().(impersonate.Client),
 		Scheme:          mgr.GetScheme(),
 		Recorder:        recorder,
 		ErrRequeueDelay: time.Minute,
 		CronParser:      cron.ParseStandard,
 		Clock:           clock.RealClock{},
+		DataDir:         helmDir,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errMsg, "controller", "TestSuite")
 		os.Exit(1)

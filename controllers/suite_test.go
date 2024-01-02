@@ -19,28 +19,31 @@ package controllers_test
 import (
 	"context"
 	"errors"
-	. "github.com/onsi/ginkgo"
-	"github.com/onsi/ginkgo/config"
+	"math"
+	"math/rand"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	konfirmv1alpha1 "github.com/raft-tech/konfirm/api/v1alpha1"
 	"github.com/raft-tech/konfirm/controllers"
+	"github.com/raft-tech/konfirm/internal/impersonate"
 	"github.com/raft-tech/konfirm/logging"
 	"github.com/robfig/cron/v3"
 	"go.uber.org/zap/zapcore"
+	v1 "k8s.io/api/core/v1"
+	rbac "k8s.io/api/rbac/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/clock"
-	"math"
-	"math/rand"
-	"os"
-	"path/filepath"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
-	"strings"
-	"testing"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -59,12 +62,7 @@ var (
 
 func TestAPIs(t *testing.T) {
 	RegisterFailHandler(Fail)
-	origConifg := config.DefaultReporterConfig
-	if v := os.Getenv("GINGKO_VERBOSE"); v != "" {
-		config.DefaultReporterConfig.Verbose = true
-	}
 	RunSpecs(t, "Controller Suite")
-	config.DefaultReporterConfig = origConifg
 }
 
 var _ = BeforeSuite(func() {
@@ -103,13 +101,17 @@ var _ = BeforeSuite(func() {
 
 	// Create a manager
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
-		Scheme: scheme.Scheme,
+		Scheme:    scheme.Scheme,
+		NewClient: impersonate.NewImpersonatingClient,
 	})
 	Expect(err).ToNot(HaveOccurred())
 
+	// Set up the default UserRef
+	setUpDefaultUserRef(context.TODO(), k8sClient)
+
 	// Set up TestController
 	err = (&controllers.TestReconciler{
-		Client:   mgr.GetClient(),
+		Client:   mgr.GetClient().(impersonate.Client),
 		Scheme:   mgr.GetScheme(),
 		Recorder: mgr.GetEventRecorderFor("test-controller"),
 	}).SetupWithManager(mgr)
@@ -125,7 +127,7 @@ var _ = BeforeSuite(func() {
 
 	// Set up TestSuiteController
 	tsr := &controllers.TestSuiteReconciler{
-		Client:     mgr.GetClient(),
+		Client:     mgr.GetClient().(impersonate.Client),
 		Scheme:     mgr.GetScheme(),
 		Recorder:   mgr.GetEventRecorderFor("testsuite-controller"),
 		CronParser: cron.ParseStandard,
@@ -152,7 +154,67 @@ var _ = BeforeSuite(func() {
 	// Seeded randomness generator
 	trand = rand.New(rand.NewSource(GinkgoRandomSeed()))
 
-}, 60)
+})
+
+func setUpDefaultUserRef(ctx context.Context, k8sClient client.Client) {
+
+	var err error
+
+	// Create the namespace
+	konfirmNamespace := v1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: impersonate.DefaultUserRef.Namespace,
+		},
+	}
+	err = k8sClient.Create(ctx, &konfirmNamespace)
+	Expect(err).ToNot(HaveOccurred())
+
+	// Create the UserRef
+	defaultUserRef := konfirmv1alpha1.UserRef{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: impersonate.DefaultUserRef.Namespace,
+			Name:      impersonate.DefaultUserRef.Name,
+		},
+		Spec: konfirmv1alpha1.UserRefSpec{
+			User: "konfirm-tester",
+		},
+	}
+	err = k8sClient.Create(ctx, &defaultUserRef)
+	Expect(err).ToNot(HaveOccurred())
+
+	// Create the ClusterRole
+	clusterRole := rbac.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{Name: "konfirm-tester-role"},
+		Rules: []rbac.PolicyRule{
+			{
+				APIGroups: []string{""},
+				Resources: []string{"pods"},
+				Verbs:     []string{"create", "patch", "delete"},
+			},
+		},
+	}
+	err = k8sClient.Create(ctx, &clusterRole)
+	Expect(err).ToNot(HaveOccurred())
+
+	// Create the ClusterRoleBinding
+	clusterRoleBinding := rbac.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: "konfirm-tester-role"},
+		Subjects: []rbac.Subject{
+			{
+				APIGroup: "rbac.authorization.k8s.io",
+				Kind:     "User",
+				Name:     defaultUserRef.Spec.User,
+			},
+		},
+		RoleRef: rbac.RoleRef{
+			APIGroup: "rbac.authorization.k8s.io",
+			Kind:     "ClusterRole",
+			Name:     clusterRole.Name,
+		},
+	}
+	err = k8sClient.Create(ctx, &clusterRoleBinding)
+	Expect(err).ToNot(HaveOccurred())
+}
 
 var _ = AfterSuite(func() {
 	mgrCancel() // Stops mgr started in BeforeSuite

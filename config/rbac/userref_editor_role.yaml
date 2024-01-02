@@ -1,0 +1,31 @@
+# permissions for end users to edit userrefs.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: clusterrole
+    app.kubernetes.io/instance: userref-editor-role
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/created-by: konfirm
+    app.kubernetes.io/part-of: konfirm
+    app.kubernetes.io/managed-by: kustomize
+  name: userref-editor-role
+rules:
+- apiGroups:
+  - konfirm.goraft.tech
+  resources:
+  - userrefs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - konfirm.goraft.tech
+  resources:
+  - userrefs/status
+  verbs:
+  - get

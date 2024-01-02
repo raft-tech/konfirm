@@ -19,7 +19,10 @@ package controllers_test
 import (
 	"context"
 	"errors"
-	. "github.com/onsi/ginkgo"
+	"strconv"
+	"time"
+
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	konfirm "github.com/raft-tech/konfirm/api/v1alpha1"
 	"github.com/raft-tech/konfirm/controllers"
@@ -27,8 +30,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"strconv"
-	"time"
 )
 
 var _ = Describe("On Test Controller reconciliation", func() {

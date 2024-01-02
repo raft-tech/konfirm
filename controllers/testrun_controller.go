@@ -263,6 +263,7 @@ func (r *TestRunReconciler) isRunning(ctx context.Context, testRun *konfirm.Test
 				},
 				Spec: konfirm.TestSpec{
 					RetentionPolicy: testRun.Spec.RetentionPolicy,
+					RunAs:           testRun.Spec.RunAs,
 					Template:        template.Template,
 				},
 			}

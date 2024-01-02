@@ -19,10 +19,13 @@ package controllers_test
 import (
 	"context"
 	konfirm "github.com/raft-tech/konfirm/api/v1alpha1"
+	"github.com/raft-tech/konfirm/controllers"
+	"github.com/stretchr/testify/assert"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"strconv"
+	"testing"
 	"time"
 )
 
@@ -136,4 +139,26 @@ func fail(ctx context.Context, pod *v1.Pod) (err error) {
 	}
 	err = k8sClient.Status().Patch(ctx, pod, client.MergeFrom(orig))
 	return
+}
+
+func TestGetBackOff(t *testing.T) {
+
+	tests := []struct {
+		input    time.Duration
+		expected time.Duration
+	}{
+		{0, 5 * time.Second},
+		{1 * time.Second, 5 * time.Second},
+		{5 * time.Second, 10 * time.Second},
+		{10 * time.Second, 20 * time.Second},
+		{20 * time.Second, 40 * time.Second},
+		{40 * time.Second, 80 * time.Second},
+		{80 * time.Second, 160 * time.Second},
+		{160 * time.Second, 5 * time.Minute},
+		{5 * time.Minute, 5 * time.Minute},
+	}
+
+	for i := range tests {
+		assert.Equal(t, tests[i].expected, controllers.GetBackOff(tests[i].input))
+	}
 }

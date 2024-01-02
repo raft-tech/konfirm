@@ -18,10 +18,11 @@ package logging
 
 import (
 	"context"
+	"strconv"
+
 	"github.com/go-logr/logr"
 	"go.uber.org/zap/zapcore"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
-	"strconv"
 )
 
 type Logger struct {
@@ -38,6 +39,10 @@ func NewLogger(from logr.Logger) *Logger {
 	}
 }
 
+func (l *Logger) DebugLogger() logr.Logger {
+	return l.debug
+}
+
 func (l *Logger) Debug(msg string, keysAndValues ...interface{}) {
 	l.debug.Info(msg, keysAndValues...)
 }
@@ -48,6 +53,10 @@ func (l *Logger) Trace(msg string, keysAndValues ...interface{}) {
 
 func (l *Logger) WithValues(keysAndValues ...interface{}) *Logger {
 	return NewLogger(l.Logger.WithValues(keysAndValues...))
+}
+
+func (l *Logger) WithCallDepth(i int) *Logger {
+	return NewLogger(l.Logger.WithCallDepth(1))
 }
 
 func FromContext(ctx context.Context, keysAndValues ...interface{}) *Logger {

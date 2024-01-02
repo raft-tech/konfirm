@@ -21,18 +21,13 @@ jobs:
         with:
           go-version: stable
       - name: Install Dependencies
-        run: go get .
-      - name: Verify
-        run: make vet
+        run: go mod download
 
   Test:
     needs: Setup
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        k8s-version: ['1.24', '1.25', '1.26', '1.27']
     env:
-      ENVTEST_K8S_VERSION: ${{ matrix.k8s-version }}
+      ENVTEST_K8S_VERSION: '1.28'
     steps:
       - uses: actions/checkout@v3
       - name: Set up Go
@@ -48,6 +43,7 @@ jobs:
 
   Build:
     needs: Test
+    if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -87,3 +83,25 @@ jobs:
         uses: github/codeql-action/upload-sarif@v2
         with:
           sarif_file: 'trivy-results.sarif'
+
+  CompatibilityTest:
+    needs: Test
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        k8s-version: ['1.25', '1.26', '1.27']
+    env:
+      ENVTEST_K8S_VERSION: ${{ matrix.k8s-version }}
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: stable
+      - name: Set up envtest
+        run: |
+          make envtest
+          echo "KUBEBUILDER_ASSETS=$(bin/setup-envtest use $ENVTEST_K8S_VERSION -p path)" >> $GITHUB_ENV
+      - name: Test
+        run: make test

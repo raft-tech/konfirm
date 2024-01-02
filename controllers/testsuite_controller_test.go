@@ -19,18 +19,25 @@ package controllers_test
 import (
 	"context"
 	"fmt"
-	. "github.com/onsi/ginkgo"
+	"net"
+	"net/http"
+	"sync"
+	"time"
+
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	konfirm "github.com/raft-tech/konfirm/api/v1alpha1"
 	"github.com/raft-tech/konfirm/controllers"
 	"github.com/robfig/cron/v3"
 	v1 "k8s.io/api/core/v1"
+	rbac "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/clock"
 	tclock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"time"
 )
 
 var _ = Describe("TestSuite Controller", func() {
@@ -43,13 +50,13 @@ var _ = Describe("TestSuite Controller", func() {
 		testSuite *konfirm.TestSuite
 	)
 
-	BeforeEach(func() {
+	BeforeEach(func(sctx context.Context) {
 
-		ctx = context.Background()
+		ctx = context.TODO()
 
 		if ns, err := generateNamespace(); err == nil {
 			namespace = ns
-			Expect(k8sClient.Create(ctx, &v1.Namespace{
+			Expect(k8sClient.Create(sctx, &v1.Namespace{
 				ObjectMeta: metav1.ObjectMeta{Name: namespace},
 			})).NotTo(HaveOccurred())
 		} else {
@@ -710,6 +717,154 @@ var _ = Describe("TestSuite Controller", func() {
 						}, timeout).Should(Satisfy(apierrors.IsNotFound), fmt.Sprintf("test run %d was not deleted", n))
 					}
 				})
+			})
+		})
+
+		Context("with setup", func() {
+
+			var (
+				repository     http.Server
+				repositoryAddr string
+				repositoryErr  error
+				repositoryWait sync.WaitGroup
+			)
+			BeforeEach(func(ctx SpecContext) {
+
+				// Set up helm repository
+				repository = http.Server{
+					Handler: http.FileServer(http.Dir("testdata/http")),
+				}
+				wg := sync.WaitGroup{}
+				wg.Add(1)
+				go func() {
+					if l, err := net.Listen("tcp", "localhost:0"); err == nil {
+						repositoryAddr = "http://" + l.Addr().String()
+						wg.Done()
+						repositoryWait.Add(1)
+						repositoryErr = repository.Serve(l)
+						repositoryWait.Done()
+					} else {
+						repositoryErr = err
+					}
+				}()
+				wg.Wait()
+				Expect(repositoryErr).NotTo(HaveOccurred())
+
+				// Create the secret
+				releaseSpec := &v1.Secret{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "setup",
+						Namespace: namespace,
+					},
+					StringData: map[string]string{
+						"chart":  repositoryAddr + "/test-0.1.0.tgz",
+						"values": fmt.Sprintf("config:\n  spec: %s", ctx.SpecReport().LeafNodeText),
+					},
+				}
+				Expect(k8sClient.Create(ctx, releaseSpec)).To(Succeed())
+
+				testSuite.Spec.SetUp.Helm.SecretName = "setup"
+
+				// Give the konfirm-tester user permission to manage resources
+				role := &rbac.Role{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: namespace,
+						Name:      "konfirm-tester",
+					},
+					Rules: []rbac.PolicyRule{
+						{
+							Verbs:     []string{"*"},
+							APIGroups: []string{""},
+							Resources: []string{"secrets", "configmaps"},
+						},
+					},
+				}
+				Expect(k8sClient.Create(ctx, role)).To(Succeed())
+				roleBinding := &rbac.RoleBinding{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: namespace,
+						Name:      "konfirm-tester",
+					},
+					Subjects: []rbac.Subject{
+						{
+							APIGroup: "rbac.authorization.k8s.io",
+							Kind:     "User",
+							Name:     "konfirm-tester",
+						},
+					},
+					RoleRef: rbac.RoleRef{
+						APIGroup: "rbac.authorization.k8s.io",
+						Kind:     "Role",
+						Name:     role.Name,
+					},
+				}
+				Expect(k8sClient.Create(ctx, roleBinding)).To(Succeed())
+			})
+
+			AfterEach(func(ctx context.Context) {
+				Expect(repository.Shutdown(ctx)).To(Succeed())
+			})
+
+			It("performs setup and teardown", func(ctx SpecContext) {
+
+				orig := testSuite.DeepCopy()
+				testSuite.Trigger = konfirm.TestSuiteTrigger{NeedsRun: true}
+				Expect(k8sClient.Patch(ctx, testSuite, client.MergeFrom(orig))).NotTo(HaveOccurred())
+
+				By("installing the Helm release")
+				Eventually(func() (*metav1.Condition, error) {
+					if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(testSuite), testSuite); err == nil {
+						return meta.FindStatusCondition(testSuite.Status.Conditions, controllers.TestSuiteSetUpCondition), nil
+					} else {
+						return nil, err
+					}
+				}).Should(And(Not(BeNil()), HaveField("Status", metav1.ConditionTrue)))
+
+				actual := v1.ConfigMap{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Namespace: namespace,
+					Name:      testSuite.Name,
+				}, &actual)).To(Succeed())
+				Expect(actual.Data).To(HaveKeyWithValue("spec", ctx.SpecReport().LeafNodeText))
+
+				var pod *v1.Pod
+				Eventually(func() bool {
+
+					var testRun *konfirm.TestRun
+					if tr, _ := getTestRuns(ctx, testSuite); len(tr) > 0 {
+						testRun = &tr[0]
+					} else {
+						return false
+					}
+
+					var test *konfirm.Test
+					if t, _ := getTests(ctx, testRun); len(t) > 0 {
+						test = &t[0]
+					} else {
+						return false
+					}
+
+					if p, _ := getPods(ctx, test); len(p) > 0 {
+						pod = &p[0]
+						return true
+					} else {
+						return false
+					}
+				}, 5*time.Second).Should(BeTrue())
+				origPod := pod.DeepCopy()
+				pod.Status.Phase = v1.PodSucceeded
+				pod.Status.Message = fmt.Sprintf("test-%s passed", pod.Name)
+				Expect(k8sClient.Status().Patch(ctx, pod, client.MergeFrom(origPod))).NotTo(HaveOccurred())
+
+				By("uninstalling the Helm release")
+				Eventually(func() (*metav1.Condition, error) {
+					if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(testSuite), testSuite); err == nil {
+						return meta.FindStatusCondition(testSuite.Status.Conditions, controllers.TestSuiteTearDownCondition), nil
+					} else {
+						return nil, err
+					}
+				}, 30*time.Second).Should(And(Not(BeNil()), HaveField("Status", metav1.ConditionTrue)))
+
 			})
 		})
 	})

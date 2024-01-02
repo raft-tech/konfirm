@@ -25,10 +25,11 @@ import (
 type TestSuitePhase string
 
 const (
-	TestSuitePending TestSuitePhase = "Pending"
-	TestSuiteReady   TestSuitePhase = "Ready"
-	TestSuiteRunning TestSuitePhase = "Running"
-	TestSuiteError   TestSuitePhase = "Error"
+	TestSuitePending  TestSuitePhase = "Pending"
+	TestSuiteReady    TestSuitePhase = "Ready"
+	TestSuiteStarting TestSuitePhase = "Starting"
+	TestSuiteRunning  TestSuitePhase = "Running"
+	TestSuiteError    TestSuitePhase = "Error"
 )
 
 // IsPending returns true if TestSuitePhase is "Pending"
@@ -41,6 +42,11 @@ func (p TestSuitePhase) IsReady() bool {
 	return p == TestSuiteReady
 }
 
+// IsStarting returns true if TestStuiePhase is "Starting"
+func (p TestSuitePhase) IsStarting() bool {
+	return p == TestSuiteStarting
+}
+
 // IsRunning returns true if TestSuitePhase is "Running"
 func (p TestSuitePhase) IsRunning() bool {
 	return p == TestSuiteRunning
@@ -48,7 +54,7 @@ func (p TestSuitePhase) IsRunning() bool {
 
 // IsError returns true if TestSuitePhase is "Error"
 func (p TestSuitePhase) IsError() bool {
-	return p == TestSuitePending
+	return p == TestSuiteError
 }
 
 // TestSuiteHelmTrigger describes a Helm release that will trigger a TestSuite
@@ -69,8 +75,6 @@ type TestSuiteTriggers struct {
 // TestSuiteHelmSetUp describes a Secret-embedded
 type TestSuiteHelmSetUp struct {
 	SecretName string `json:"secret,omitempty"`
-	ChartKey   string `json:"chartKey,omitempty"`
-	ValuesKey  string `json:"valuesKey,omitempty"`
 }
 
 // TestSuiteSetUp describes any setup that should occur before the Tests are run
@@ -87,6 +91,9 @@ type TestSuiteSpec struct {
 	HistoryLimit uint8 `json:"historyLimit,omitempty"`
 
 	SetUp TestSuiteSetUp `json:"setUp,omitempty"`
+
+	// RunAs is the name of the UserRef the resulting pods and any setup will be managed as
+	RunAs string `json:"runAs,omitempty"`
 
 	// +kubebuilder:validation:Required
 	Template TestRunSpec `json:"template"`
@@ -109,7 +116,7 @@ type TestSuiteStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// +kubebuilder:default=Pending
-	// Phase (Pending, Ready, Running, Error)
+	// +kubebuilder:validation:Enum=Pending;Ready;Starting;Running;Error
 	Phase TestSuitePhase `json:"phase,omitempty"`
 
 	CurrentTestRun string `json:"currentTestRun,omitempty"`
