@@ -40,3 +40,17 @@ type WrappedError struct {
 func (e *WrappedError) Unwrap() error {
 	return e.wrapped
 }
+
+func UnwrapAndJoin(err error) error {
+	var errs []error
+	errs = append(errs, err)
+	unwrapAndJoin(err, &errs)
+	return errors.Join(errs...)
+}
+
+func unwrapAndJoin(err error, to *[]error) {
+	if e := errors.Unwrap(err); e != nil {
+		*to = append(*to, e)
+		unwrapAndJoin(e, to)
+	}
+}
