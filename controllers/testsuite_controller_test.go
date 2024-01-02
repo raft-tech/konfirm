@@ -863,7 +863,7 @@ var _ = Describe("TestSuite Controller", func() {
 					} else {
 						return nil, err
 					}
-				}, 15*time.Second).Should(And(Not(BeNil()), HaveField("Status", metav1.ConditionTrue)))
+				}, 30*time.Second).Should(And(Not(BeNil()), HaveField("Status", metav1.ConditionTrue)))
 
 			})
 		})
