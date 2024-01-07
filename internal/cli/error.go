@@ -1,5 +1,5 @@
 /*
- Copyright 2022 Raft, LLC
+ Copyright 2024 Raft, LLC
 
  Licensed under the Apache License, Version 2.0 (the "License");
  you may not use this file except in compliance with the License.
@@ -14,37 +14,34 @@
  limitations under the License.
 */
 
-package main
+package cli
 
 import (
-	"context"
-	_ "embed"
 	"errors"
-	"os"
-	"os/signal"
-
-	"github.com/raft-tech/konfirm/cmd"
-	"github.com/raft-tech/konfirm/internal/cli"
+	"fmt"
 )
 
-var (
-	//go:embed VERSION
-	version string
-)
+type ExitError interface {
+	error
+	ExitCode() int
+}
 
-func main() {
+func Errorf(code int, format string, args ...any) ExitError {
+	return Error(code, fmt.Sprintf(format, args...))
+}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, os.Kill)
-	defer stop()
-
-	konfirm := cmd.New()
-	konfirm.Version = version
-	if err := konfirm.ExecuteContext(ctx); err != nil {
-		code := 1
-		var xerr cli.ExitError
-		if errors.As(err, &xerr) {
-			code = xerr.ExitCode()
-		}
-		os.Exit(code)
+func Error(code int, msg string) ExitError {
+	return xerror{
+		error: errors.New(msg),
+		code:  code,
 	}
+}
+
+type xerror struct {
+	error
+	code int
+}
+
+func (err xerror) ExitCode() int {
+	return err.code
 }
