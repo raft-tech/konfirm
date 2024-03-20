@@ -27,7 +27,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	konfirmv1alpha1 "github.com/raft-tech/konfirm/api/v1alpha1"
+	konfirm "github.com/raft-tech/konfirm/api/v1alpha1"
 	"github.com/raft-tech/konfirm/controllers"
 	"github.com/raft-tech/konfirm/internal/impersonate"
 	"github.com/raft-tech/konfirm/logging"
@@ -90,7 +90,7 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(cfg).NotTo(BeNil())
 
-	err = konfirmv1alpha1.AddToScheme(scheme.Scheme)
+	err = konfirm.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
 
 	//+kubebuilder:scaffold:scheme
@@ -170,12 +170,12 @@ func setUpDefaultUserRef(ctx context.Context, k8sClient client.Client) {
 	Expect(err).ToNot(HaveOccurred())
 
 	// Create the UserRef
-	defaultUserRef := konfirmv1alpha1.UserRef{
+	defaultUserRef := konfirm.UserRef{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: impersonate.DefaultUserRef.Namespace,
 			Name:      impersonate.DefaultUserRef.Name,
 		},
-		Spec: konfirmv1alpha1.UserRefSpec{
+		Spec: konfirm.UserRefSpec{
 			User: "konfirm-tester",
 		},
 	}
