@@ -14,14 +14,17 @@
  limitations under the License.
 */
 
+// Package logging
+// Deprecated: Use [internal/logging] instead.
 package logging
 
 import (
 	"context"
+	"strconv"
+
 	"github.com/go-logr/logr"
 	"go.uber.org/zap/zapcore"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
-	"strconv"
 )
 
 type Logger struct {
@@ -38,6 +41,10 @@ func NewLogger(from logr.Logger) *Logger {
 	}
 }
 
+func (l *Logger) DebugLogger() logr.Logger {
+	return l.debug
+}
+
 func (l *Logger) Debug(msg string, keysAndValues ...interface{}) {
 	l.debug.Info(msg, keysAndValues...)
 }
@@ -50,10 +57,16 @@ func (l *Logger) WithValues(keysAndValues ...interface{}) *Logger {
 	return NewLogger(l.Logger.WithValues(keysAndValues...))
 }
 
+func (l *Logger) WithCallDepth(i int) *Logger {
+	return NewLogger(l.Logger.WithCallDepth(1))
+}
+
 func FromContext(ctx context.Context, keysAndValues ...interface{}) *Logger {
 	return NewLogger(logr.FromContextOrDiscard(ctx).WithValues(keysAndValues...))
 }
 
+// FromContextWithName
+// Deprecated: Use [github.com/raft-tech/konfirm/internal/logging.FromContext] instead.
 func FromContextWithName(ctx context.Context, name string, keysAndValues ...interface{}) *Logger {
 	return NewLogger(logr.FromContextOrDiscard(ctx).WithName(name).WithValues(keysAndValues...))
 }

@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"github.com/prometheus/client_golang/prometheus"
 	konfirm "github.com/raft-tech/konfirm/api/v1alpha1"
+	"github.com/raft-tech/konfirm/internal/impersonate"
 	"github.com/raft-tech/konfirm/logging"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -65,7 +66,7 @@ func init() {
 
 // TestReconciler reconciles a Test object
 type TestReconciler struct {
-	client.Client
+	impersonate.Client
 	Scheme          *runtime.Scheme
 	Recorder        record.EventRecorder
 	ErrRequeueDelay time.Duration
@@ -73,7 +74,8 @@ type TestReconciler struct {
 
 //+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=tests,verbs=get;list;watch
 //+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=tests/status,verbs=get;patch
-//+kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=konfirm.goraft.tech,resources=userrefs,verbs=get
+//+kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 //+kubebuilder:rbac:groups="",resources=pods/status,verbs=get
 //+kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
@@ -195,7 +197,16 @@ func (r *TestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (res c
 
 func (r *TestReconciler) isRunning(ctx context.Context, test *konfirm.Test, pods []v1.Pod) (res ctrl.Result, err error) {
 
-	logger := logging.FromContextWithName(ctx, "test-controller")
+	logger := logging.FromContextWithName(ctx, "test-controller", "runAs", test.Spec.RunAs)
+
+	// Get impersonator
+	var user client.Client
+	logger.Trace("initiating impersonation")
+	if user, err = r.Impersonate(ctx, test.Namespace, test.Spec.RunAs); err != nil {
+		logger.Error(err, "error initializing impersonation")
+		return ctrl.Result{RequeueAfter: r.ErrRequeueDelay}, nil
+	}
+	logger.Debug("impersonation initialized")
 
 	// Determine which pod will be used to determine the test results
 	var pod *v1.Pod
@@ -242,7 +253,7 @@ func (r *TestReconciler) isRunning(ctx context.Context, test *konfirm.Test, pods
 					pod = newPods[i]
 				} else {
 					logger.Debug("removing extraneous pod", "pod", newPods[i].Name)
-					if _, err := cleanUp(ctx, r.Client, TestControllerFinalizer, newPods[i]); err != nil {
+					if _, err := cleanUp(ctx, user, TestControllerFinalizer, newPods[i]); err != nil {
 						if err = client.IgnoreNotFound(err); err != nil {
 							logger.Info("error removing extraneous pod", "pod", newPods[i].Name)
 							errs.Append(err)
@@ -283,7 +294,7 @@ func (r *TestReconciler) isRunning(ctx context.Context, test *konfirm.Test, pods
 		}
 		pod.ObjectMeta.Finalizers = []string{TestControllerFinalizer}
 		pod.Spec.RestartPolicy = v1.RestartPolicyNever
-		if err = r.Create(ctx, pod); err != nil {
+		if err = user.Create(ctx, pod); err != nil {
 			logger.Info("error creating pod")
 			r.Recorder.Event(test, "Warning", TestErrorEvent, "An error occurred while creating a test pod")
 			return ctrl.Result{
@@ -419,7 +430,16 @@ func (r *TestReconciler) isRunning(ctx context.Context, test *konfirm.Test, pods
 
 func (r *TestReconciler) isComplete(ctx context.Context, test *konfirm.Test, pods []v1.Pod) (res ctrl.Result, err error) {
 
-	logger := logging.FromContextWithName(ctx, "test-controller")
+	logger := logging.FromContextWithName(ctx, "test-controller", "runAs", test.Spec.RunAs)
+
+	// Get impersonator
+	var user client.Client
+	logger.Trace("initiating impersonation")
+	if user, err = r.Impersonate(ctx, test.Namespace, test.Spec.RunAs); err != nil {
+		logger.Error(err, "error initializing impersonation")
+		return ctrl.Result{RequeueAfter: r.ErrRequeueDelay}, nil
+	}
+	logger.Debug("impersonation initialized")
 
 	// Remove finalizers from deleted pods
 	errs := ErrorList{}
@@ -427,7 +447,7 @@ func (r *TestReconciler) isComplete(ctx context.Context, test *konfirm.Test, pod
 		pod := &pods[i]
 		if pod.DeletionTimestamp != nil {
 			logger.Trace("removing finalizer from pod", "pod", pod.Name)
-			if patched, err := removeFinalizer(ctx, r.Client, TestControllerFinalizer, pod); err != nil {
+			if patched, err := removeFinalizer(ctx, user, TestControllerFinalizer, pod); err != nil {
 				if err = client.IgnoreNotFound(err); err != nil {
 					logger.Info("error removing finalizer from pod", "pod", pod.Name)
 					errs.Append(err)
@@ -451,7 +471,7 @@ func (r *TestReconciler) isComplete(ctx context.Context, test *konfirm.Test, pod
 			logger.Trace("applying retention policy")
 			errs = ErrorList{}
 			for i := range pods {
-				if _, e := cleanUp(ctx, r.Client, TestControllerFinalizer, &pods[i]); e != nil {
+				if _, e := cleanUp(ctx, user, TestControllerFinalizer, &pods[i]); e != nil {
 					errs.Append(e)
 				}
 			}

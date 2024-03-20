@@ -18,7 +18,8 @@ package controllers_test
 
 import (
 	"context"
-	. "github.com/onsi/ginkgo"
+
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	konfirm "github.com/raft-tech/konfirm/api/v1alpha1"
 	v1 "k8s.io/api/core/v1"

@@ -1,5 +1,5 @@
 FROM gcr.io/distroless/static:nonroot
 WORKDIR /
 COPY manager .
-USER 65532:65532
+USER 2000:2000
 ENTRYPOINT ["/manager"]

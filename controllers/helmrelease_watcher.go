@@ -19,6 +19,7 @@ package controllers
 import (
 	"context"
 	"errors"
+
 	konfirm "github.com/raft-tech/konfirm/api/v1alpha1"
 	"github.com/raft-tech/konfirm/logging"
 	v1 "k8s.io/api/core/v1"
@@ -74,7 +75,7 @@ func (h *EnqueueForHelmTrigger) Create(ctx context.Context, e event.CreateEvent,
 }
 
 func (h *EnqueueForHelmTrigger) Update(ctx context.Context, e event.UpdateEvent, q workqueue.RateLimitingInterface) {
-	return
+	h.handle(ctx, e.ObjectNew, q)
 }
 
 func (h *EnqueueForHelmTrigger) Delete(ctx context.Context, e event.DeleteEvent, q workqueue.RateLimitingInterface) {

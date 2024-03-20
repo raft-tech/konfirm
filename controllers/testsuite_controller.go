@@ -20,13 +20,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/raft-tech/konfirm/internal/setup"
+	"github.com/raft-tech/konfirm/internal/utils"
+	"k8s.io/apimachinery/pkg/util/yaml"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
+
 	"github.com/prometheus/client_golang/prometheus"
 	konfirm "github.com/raft-tech/konfirm/api/v1alpha1"
+	"github.com/raft-tech/konfirm/internal/impersonate"
 	"github.com/raft-tech/konfirm/logging"
 	"github.com/robfig/cron/v3"
 	v1 "k8s.io/api/core/v1"
@@ -46,13 +51,21 @@ const (
 	testRunIndexKey                    = ".metadata.controller"
 	TestSuiteControllerFinalizer       = konfirm.GroupName + "/testsuite-controller"
 	TestSuiteScheduleAnnotation        = konfirm.GroupName + "/active-schedule"
+	TestSuiteSetUpAnnotation           = konfirm.GroupName + "/setup-helm-release"
 	TestSuiteLastHelmReleaseAnnotation = konfirm.GroupName + "/last-helm-release"
 	TestSuiteHelmTriggerLabel          = konfirm.GroupName + "/helm-trigger"
 	TestSuiteNeedsRunCondition         = "NeedsRun"
+	TestSuiteIsStartingCondition       = "IsStarting"
 	TestSuiteRunStartedCondition       = "RunStarted"
 	TestSuiteHasScheduleCondition      = "HasSchedule"
+	TestSuiteSetUpCondition            = "SetUpCompleted"
+	TestSuiteTearDownCondition         = "TearDownCompleted"
 	TestSuiteErrorCondition            = "HasError"
 	testSuiteControllerLoggerName      = "testsuite-controller"
+)
+
+var (
+	ErrUnhandledErrorDuringSetUp error = errors.New("an unexpected error occurred")
 )
 
 var (
@@ -82,12 +95,13 @@ func init() {
 
 // TestSuiteReconciler reconciles a TestSuite object
 type TestSuiteReconciler struct {
-	client.Client
+	impersonate.Client
 	Scheme          *runtime.Scheme
 	Recorder        record.EventRecorder
 	ErrRequeueDelay time.Duration
 	CronParser      func(string) (cron.Schedule, error)
 	Clock           clock.PassiveClock
+	DataDir         string
 }
 
 type testSuiteTrigger struct {
@@ -110,7 +124,7 @@ type testSuiteTrigger struct {
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.11.2/pkg/reconcile
 func (r *TestSuiteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 
-	logger := logging.FromContextWithName(ctx, testSuiteControllerLoggerName)
+	logger := logging.FromContextWithName(ctx, testSuiteControllerLoggerName).WithValues("namespace", req.Namespace, "testSuite", req.Name)
 	logger.Debug("starting test suite reconciliation")
 
 	// Get the TestSuite
@@ -169,6 +183,8 @@ func (r *TestSuiteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	} else if patched {
 		logger.Debug("added finalizer")
 	}
+
+	// Handle errors
 
 	// Handle changes to scheduling
 	if sched := testSuite.Spec.When.Schedule; sched != "" {
@@ -312,7 +328,7 @@ func (r *TestSuiteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// Phase-specific logic
-	if testSuite.Status.Phase.IsRunning() {
+	if p := testSuite.Status.Phase; p.IsRunning() || p.IsStarting() || p.IsError() {
 		return r.isRunning(ctx, &testSuite, &testRuns)
 	} else {
 		return r.notRunning(ctx, &testSuite, &testRuns)
@@ -323,7 +339,7 @@ func (r *TestSuiteReconciler) notRunning(ctx context.Context, testSuite *konfirm
 
 	logger := logging.FromContextWithName(ctx, testSuiteControllerLoggerName)
 
-	// TODO If setUp is specified, ensure it is possible
+	// Make ready to start
 	if testSuite.Status.Phase == konfirm.TestSuitePending {
 		orig := testSuite.DeepCopy()
 		testSuite.Status.Phase = konfirm.TestSuiteReady
@@ -418,13 +434,11 @@ func (r *TestSuiteReconciler) notRunning(ctx context.Context, testSuite *konfirm
 
 		// If the release is in another namespace, it must be exported to the test suite's namespace to be observed
 		ok := true
-		if pos := strings.Index(releaseName, string(types.Separator)); pos != -1 && pos < len(releaseName)-1 {
-			release.Namespace = releaseName[:pos]
-			release.Name = releaseName[pos+1:]
+		if policyName := MakeNamespacedName(releaseName); policyName.Namespace != "" {
 			policy := konfirm.HelmPolicy{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      release.Name,
-					Namespace: release.Namespace,
+					Name:      policyName.Name,
+					Namespace: policyName.Namespace,
 				},
 			}
 			if err := r.Get(ctx, client.ObjectKeyFromObject(&policy), &policy); err == nil {
@@ -529,7 +543,7 @@ func (r *TestSuiteReconciler) notRunning(ctx context.Context, testSuite *konfirm
 	}
 
 	// Trigger the test run
-	testSuite.Status.Phase = konfirm.TestSuiteRunning
+	testSuite.Status.Phase = konfirm.TestSuiteStarting
 	testSuite.Status.CurrentTestRun = ""
 	meta.SetStatusCondition(&testSuite.Status.Conditions, metav1.Condition{
 		Type:               TestSuiteNeedsRunCondition,
@@ -538,12 +552,12 @@ func (r *TestSuiteReconciler) notRunning(ctx context.Context, testSuite *konfirm
 		Reason:             trigger.Reason,
 		Message:            trigger.Message,
 	})
-	logger.Trace("setting test suite as Running")
+	logger.Trace("setting test suite as Starting")
 	if err := r.Status().Patch(ctx, testSuite, trigger.Patch); err != nil {
-		logger.Error(err, "error setting test suite as Running")
+		logger.Error(err, "error setting test suite as Starting")
 		return ctrl.Result{RequeueAfter: r.ErrRequeueDelay}, nil
 	}
-	logger.Debug("test suite set as Running")
+	logger.Debug("test suite set as Starting")
 	r.Recorder.Event(testSuite, "Normal", "TestSuiteTriggered", trigger.Message)
 
 	return ctrl.Result{}, nil
@@ -568,11 +582,76 @@ func (r *TestSuiteReconciler) isRunning(ctx context.Context, testSuite *konfirm.
 				Requeue: true,
 			}, errors.New("current test run is missing")
 		}
-	} else {
+	} else { // Test Suite was triggered but no Test Run exists yet
 
-		// Test Suite was triggered but no Test Run exists yet
+		// Perform SetUp if defined
+		if ok, err := r.doSetUp(ctx, testSuite); err != nil {
 
-		// TODO: Perform setUp if defined
+			// If set up encountered an unexpected error, then retry later
+			if errors.Is(err, ErrUnhandledErrorDuringSetUp) {
+				return ctrl.Result{RequeueAfter: r.ErrRequeueDelay}, nil
+			}
+
+			// If set up fails, set status to Error
+			if testSuite.Status.Phase != konfirm.TestSuiteError {
+				orig := testSuite.DeepCopy()
+				testSuite.Status.Phase = konfirm.TestSuiteError
+				meta.SetStatusCondition(&testSuite.Status.Conditions, metav1.Condition{
+					Type:               TestSuiteErrorCondition,
+					Status:             metav1.ConditionTrue,
+					ObservedGeneration: testSuite.Generation,
+					Reason:             "SetUpFailed",
+					Message:            err.Error(),
+				})
+				logger.Trace("setting Error status")
+				if err := r.Client.Status().Patch(ctx, testSuite, client.MergeFrom(orig)); err == nil {
+					logger.Debug("set Error status")
+				}
+			} else {
+				// Exponential back off up to 5 sec to 5 min
+				if c, ok := getCondition(TestSuiteErrorCondition, testSuite.Status.Conditions); ok && c.Message == err.Error() {
+					since := time.Now().Sub(c.LastTransitionTime.Time).Seconds()
+					var backoff time.Duration
+					switch {
+					case since < 5.0:
+						backoff = 5 * time.Second
+					case since < 10.0:
+						backoff = 10 * time.Second
+					case since < 20.0:
+						backoff = 20 * time.Second
+					case since < 40.0:
+						backoff = 40 * time.Second
+					case since < 80.0:
+						backoff = 80 * time.Second
+					case since < 160.0:
+						backoff = 160 * time.Second
+					default:
+						backoff = 300 * time.Second
+					}
+					logger.Info("backing off due to error state", "retryAfter", fmt.Sprintf("%.0fs", backoff.Seconds()))
+					return ctrl.Result{RequeueAfter: backoff}, nil
+				} else {
+					orig := testSuite.DeepCopy()
+					meta.SetStatusCondition(&testSuite.Status.Conditions, metav1.Condition{
+						Type:               TestSuiteErrorCondition,
+						Status:             metav1.ConditionTrue,
+						ObservedGeneration: testSuite.Generation,
+						Reason:             "SetUpFailed",
+						Message:            err.Error(),
+					})
+					logger.Trace("updating Error condition")
+					if err := r.Client.Status().Patch(ctx, testSuite, client.MergeFrom(orig)); err != nil {
+						logger.Error(err, "error updating TestSuite error condition")
+						return ctrl.Result{RequeueAfter: r.ErrRequeueDelay}, nil
+					}
+					logger.Debug("updated Error condition")
+					return ctrl.Result{}, nil
+				}
+			}
+		} else if !ok {
+			// Reconciliation will be triggered when set up completes, requeue for 5 min later to catch race conditions
+			return ctrl.Result{RequeueAfter: 300 * time.Second}, nil
+		}
 
 		// Create the test run
 		logger.Trace("creating test run")
@@ -598,6 +677,7 @@ func (r *TestSuiteReconciler) isRunning(ctx context.Context, testSuite *konfirm.
 			},
 			Spec: konfirm.TestRunSpec{
 				RetentionPolicy: testSuite.Spec.Template.RetentionPolicy,
+				RunAs:           testSuite.Spec.RunAs,
 				Tests:           testSuite.Spec.Template.Tests,
 			},
 		}
@@ -639,38 +719,295 @@ func (r *TestSuiteReconciler) isRunning(ctx context.Context, testSuite *konfirm.
 	// Handle finished test runs
 	if phase := currentRun.Status.Phase; phase == konfirm.TestRunPassed || phase == konfirm.TestRunFailed {
 
-		// Update test suite status
-		logger.Trace("setting test suite as Ready")
+		if c := meta.FindStatusCondition(testSuite.Status.Conditions, TestSuiteRunStartedCondition); c == nil || c.Status == metav1.ConditionTrue {
+
+			// Update test suite status
+			logger.Trace("updating RunStarted condition")
+			orig := testSuite.DeepCopy()
+			testSuite.Status.CurrentTestRun = ""
+			meta.SetStatusCondition(&testSuite.Status.Conditions, metav1.Condition{
+				Type:               TestSuiteRunStartedCondition,
+				Status:             metav1.ConditionFalse,
+				ObservedGeneration: testSuite.Generation,
+				Reason:             "TestRunCompleted",
+				Message:            fmt.Sprintf("test run %s completed", currentRun.Name),
+			})
+			if err := r.Status().Patch(ctx, testSuite, client.MergeFrom(orig)); err != nil {
+				logger.Error(err, "error setting status")
+				return ctrl.Result{RequeueAfter: r.ErrRequeueDelay}, nil
+			}
+			logger.Debug("updated RunStarted condition")
+			suiteRuns.WithLabelValues(testSuite.Namespace, testSuite.Name).Inc()
+
+			// Record an event and update metrics
+			if phase == konfirm.TestRunPassed {
+				suitePassing.WithLabelValues(testSuite.Namespace, testSuite.Name).Set(1)
+				suiteFailing.WithLabelValues(testSuite.Namespace, testSuite.Name).Set(0)
+				r.Recorder.Eventf(testSuite, "Normal", "TestRunPassed", "test run %s passed", currentRun.Name)
+			} else {
+				suiteFailing.WithLabelValues(testSuite.Namespace, testSuite.Name).Set(1)
+				suitePassing.WithLabelValues(testSuite.Namespace, testSuite.Name).Set(0)
+				r.Recorder.Eventf(testSuite, "Warning", "TestRunFailed", "test run %s failed", currentRun.Name)
+			}
+		}
+
+		if done, err := r.doTearDown(ctx, testSuite); err != nil {
+			return ctrl.Result{RequeueAfter: r.ErrRequeueDelay}, nil
+		} else if !done {
+			return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
+		}
+
+		logger.Trace("updating status")
 		orig := testSuite.DeepCopy()
 		testSuite.Status.Phase = konfirm.TestSuiteReady
-		testSuite.Status.CurrentTestRun = ""
-		meta.SetStatusCondition(&testSuite.Status.Conditions, metav1.Condition{
-			Type:               TestSuiteRunStartedCondition,
-			Status:             metav1.ConditionFalse,
-			ObservedGeneration: testSuite.Generation,
-			Reason:             "TestRunCompleted",
-			Message:            fmt.Sprintf("test run %s completed", currentRun.Name),
-		})
 		if err := r.Status().Patch(ctx, testSuite, client.MergeFrom(orig)); err != nil {
 			logger.Error(err, "error setting status")
 			return ctrl.Result{RequeueAfter: r.ErrRequeueDelay}, nil
 		}
-		logger.Debug("test suite set as ready")
-		suiteRuns.WithLabelValues(testSuite.Namespace, testSuite.Name).Inc()
-
-		// Record an event and update metrics
-		if phase == konfirm.TestRunPassed {
-			suitePassing.WithLabelValues(testSuite.Namespace, testSuite.Name).Set(1)
-			suiteFailing.WithLabelValues(testSuite.Namespace, testSuite.Name).Set(0)
-			r.Recorder.Eventf(testSuite, "Normal", "TestRunPassed", "test run %s passed", currentRun.Name)
-		} else {
-			suiteFailing.WithLabelValues(testSuite.Namespace, testSuite.Name).Set(1)
-			suitePassing.WithLabelValues(testSuite.Namespace, testSuite.Name).Set(0)
-			r.Recorder.Eventf(testSuite, "Warning", "TestRunFailed", "test run %s failed", currentRun.Name)
-		}
+		logger.Debug("updated status")
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// doSetUp performs any required setup and returns true when all set up
+// is complete. An error is returned if set up cannot be performed.
+func (r *TestSuiteReconciler) doSetUp(ctx context.Context, testSuite *konfirm.TestSuite) (bool, error) {
+
+	config := &testSuite.Spec.SetUp.Helm
+
+	// Return early if no set up
+	if config.SecretName == "" {
+		return true, nil
+	}
+
+	logger := logging.FromContextWithName(ctx, testSuiteControllerLoggerName, "namespace", testSuite.Namespace, "testSuite", testSuite.Name)
+
+	// Check if teardown is in progress
+	if c := meta.FindStatusCondition(testSuite.Status.Conditions, TestSuiteTearDownCondition); c != nil {
+		if c.Status == metav1.ConditionFalse {
+			return false, nil
+		}
+	}
+
+	// Check if set up is complete
+	if c := meta.FindStatusCondition(testSuite.Status.Conditions, TestSuiteSetUpCondition); c != nil {
+		return c.Status == metav1.ConditionTrue, nil
+	}
+
+	// Get and validate the Helm secret
+	var hparams setup.HelmReleaseParams
+	{
+		logger := logger.WithValues("secret", testSuite.Spec.SetUp.Helm.SecretName)
+		logger.Trace("getting setup secret")
+		setupParams := v1.Secret{}
+		if e := r.Client.Get(ctx, client.ObjectKey{
+			Namespace: testSuite.Namespace,
+			Name:      config.SecretName,
+		}, &setupParams); e != nil {
+			if e = client.IgnoreNotFound(e); e != nil {
+				logger.Error(e, "error getting secret")
+				e = utils.WrapError(e, "an error occurred fetching the specified secret")
+			} else {
+				msg := "specified setup secret does not exist"
+				logger.Info(msg)
+				e = utils.WrapError(ErrResourceNotFound, msg)
+			}
+			return false, e
+		}
+
+		hparams = setup.HelmReleaseParams{
+			ReleaseName: testSuite.Name,
+			Chart: setup.ChartRef{
+				URL:      string(setupParams.Data["chart"]),
+				Username: string(setupParams.Data["username"]),
+				Password: string(setupParams.Data["password"]),
+			},
+			Values: make(map[string]any),
+		}
+
+		if v, ok := setupParams.Data["values"]; ok && len(v) > 0 {
+			if err := yaml.Unmarshal(v, &hparams.Values); err != nil {
+				return false, utils.WrapfError(err, "YAML decoding of Helm values failed")
+			}
+		}
+	}
+
+	// Set up the helm client
+	var helm setup.HelmClient
+	if hc, err := r.getHelmClient(ctx, testSuite.Namespace, testSuite.Spec.RunAs); err == nil {
+		helm = hc
+	} else {
+		return false, err
+	}
+
+	// Add the SetUp condition and remove any existing error or teardown condition
+	orig := testSuite.DeepCopy()
+	testSuite.Status.Phase = konfirm.TestSuiteStarting
+	meta.RemoveStatusCondition(&testSuite.Status.Conditions, TestSuiteErrorCondition)
+	meta.RemoveStatusCondition(&testSuite.Status.Conditions, TestSuiteTearDownCondition)
+	meta.SetStatusCondition(&testSuite.Status.Conditions, metav1.Condition{
+		Type:               TestSuiteSetUpCondition,
+		Status:             metav1.ConditionFalse,
+		ObservedGeneration: testSuite.Generation,
+		Reason:             "SetUpInProgress",
+		Message:            "Set up is currently in progress",
+	})
+	logger.Trace("updating SetUp condition")
+	if err := r.Client.Status().Patch(ctx, testSuite, client.MergeFrom(orig)); err != nil {
+		logger.Error(err, "error updating TestSuite setup condition")
+		return false, ErrUnhandledErrorDuringSetUp
+	}
+	logger.Debug("updated SetUp condition")
+
+	go func(ctx context.Context) {
+
+		// TODO handle unexpected failures
+
+		// Perform the release
+		if rel, err := helm.Install(ctx, hparams); err == nil {
+			logger.Info("set up completed")
+			orig := testSuite.DeepCopy()
+			testSuite.Status.Phase = konfirm.TestSuiteRunning
+			meta.SetStatusCondition(&testSuite.Status.Conditions, metav1.Condition{
+				Type:               TestSuiteSetUpCondition,
+				Status:             metav1.ConditionTrue,
+				ObservedGeneration: testSuite.Generation,
+				Reason:             "SetUpCompleted",
+				Message:            fmt.Sprintf("Helm release %s successfully deployed", rel.Name),
+			})
+			logger.Trace("updating TestSuite status")
+			if err := r.Client.Status().Patch(ctx, testSuite, client.MergeFrom(orig)); err != nil {
+				logger.Error(err, "error updating TestSuite status after failed set up")
+			}
+			r.Recorder.Event(testSuite, "Normal", "SetUpCompleted", "Helm set up successfully completed")
+		} else {
+			// When an error occurs, there is not much we can do other than stop the current run and consider it failed
+			logger.Error(utils.UnwrapAndJoin(err), "set up failed with error")
+			orig := testSuite.DeepCopy()
+			testSuite.Status.Phase = konfirm.TestSuiteReady
+			meta.RemoveStatusCondition(&testSuite.Status.Conditions, TestSuiteSetUpCondition)
+			logger.Trace("updating TestSuite status")
+			if err := r.Client.Status().Patch(ctx, testSuite, client.MergeFrom(orig)); err != nil {
+				logger.Error(err, "error updating TestSuite status after failed set up")
+			}
+			logger.Debug("updated TestSuite status")
+			suiteFailing.WithLabelValues(testSuite.Namespace, testSuite.Name).Set(1)
+			suitePassing.WithLabelValues(testSuite.Namespace, testSuite.Name).Set(0)
+			r.Recorder.Event(testSuite, "Warning", "SetUpFailed", "Helm set up failed")
+			r.Recorder.Event(testSuite, "Warning", "TestRunFailed", "test set up failed")
+		}
+	}(context.WithoutCancel(ctx))
+
+	return false, nil
+}
+
+// doTearDown performs any required teardown and returns true w
+func (r *TestSuiteReconciler) doTearDown(ctx context.Context, testSuite *konfirm.TestSuite) (bool, error) {
+
+	// Check if teardown is in progress
+	if c := meta.FindStatusCondition(testSuite.Status.Conditions, TestSuiteTearDownCondition); c != nil {
+		return c.Status == metav1.ConditionTrue, nil
+	}
+
+	logger := logging.FromContextWithName(ctx, testSuiteControllerLoggerName, "namespace", testSuite.Namespace, "testSuite", testSuite.Name)
+
+	// Update conditions
+	orig := testSuite.DeepCopy()
+	testSuite.Status.Phase = konfirm.TestSuiteRunning
+	meta.RemoveStatusCondition(&testSuite.Status.Conditions, TestSuiteSetUpCondition)
+	meta.SetStatusCondition(&testSuite.Status.Conditions, metav1.Condition{
+		Type:               TestSuiteTearDownCondition,
+		Status:             metav1.ConditionFalse,
+		ObservedGeneration: testSuite.Generation,
+		Reason:             "TearDownInProgress",
+		Message:            "tear down is currently in progress",
+	})
+	logger.Trace("updating TestSuite status")
+	if err := r.Client.Status().Patch(ctx, testSuite, client.MergeFrom(orig)); err != nil {
+		logger.Error(err, "error updating TestSuite status after failed set up")
+	}
+
+	// Set up the helm client
+	var helm setup.HelmClient
+	if hc, err := r.getHelmClient(ctx, testSuite.Namespace, testSuite.Spec.RunAs); err == nil {
+		helm = hc
+	} else {
+		return false, err
+	}
+
+	// Perform the teardown
+	logger.Info("starting teardown")
+	go func(ctx context.Context) {
+
+		// TODO handle unexpected failures
+
+		// Perform the release
+		if err := helm.Uninstall(ctx, testSuite.Name); err == nil {
+			logger.Info("teardown completed")
+			orig := testSuite.DeepCopy()
+			meta.SetStatusCondition(&testSuite.Status.Conditions, metav1.Condition{
+				Type:               TestSuiteTearDownCondition,
+				Status:             metav1.ConditionTrue,
+				ObservedGeneration: testSuite.Generation,
+				Reason:             "TeardownCompleted",
+				Message:            fmt.Sprintf("Helm release %s successfully uninstalled", testSuite.Name),
+			})
+			logger.Trace("updating TestSuite status")
+			if err := r.Client.Status().Patch(ctx, testSuite, client.MergeFrom(orig)); err != nil {
+				logger.Error(err, "error updating TestSuite status after failed set up")
+			}
+			r.Recorder.Event(testSuite, "Normal", "SetUpCompleted", "Helm set up successfully completed")
+		} else {
+			// When an error occurs, there is not much we can do other than record an event and otherwise behave as if it had not failed
+			logger.Error(err, "teardown failed with error")
+			orig := testSuite.DeepCopy()
+			testSuite.Status.Phase = konfirm.TestSuiteReady
+			meta.RemoveStatusCondition(&testSuite.Status.Conditions, TestSuiteTearDownCondition)
+			logger.Trace("updating TestSuite status")
+			if err := r.Client.Status().Patch(ctx, testSuite, client.MergeFrom(orig)); err != nil {
+				logger.Error(err, "error updating TestSuite status after failed teardown")
+			}
+			logger.Debug("updated TestSuite status")
+			r.Recorder.Event(testSuite, "Warning", "TeardownFailed", "Helm uninstall failed")
+		}
+	}(context.WithoutCancel(ctx))
+
+	return false, nil
+}
+
+func (r *TestSuiteReconciler) getHelmClient(ctx context.Context, namespace string, runas string) (setup.HelmClient, error) {
+
+	logger := logging.FromContextWithName(ctx, testSuiteControllerLoggerName, "namespace", namespace)
+
+	// Get impersonator
+	var user impersonate.Client
+	logger.Trace("initiating impersonation")
+	if u, err := r.Impersonate(ctx, namespace, runas); err == nil {
+		user = u
+	} else {
+		if errors.Is(err, impersonate.ErrUserRefNotFound) {
+			logger.Debug("UserRef not found", "userRef", runas)
+			return nil, errors.New("specified UserRef not found")
+		} else {
+			logger.Error(err, "unable to run as UserRef", "userRef", runas)
+			return nil, ErrUnhandledErrorDuringSetUp
+		}
+	}
+	logger.Debug("impersonation initialized")
+
+	// Create the Helm Client
+	if hc, err := setup.NewHelmClient(setup.HelmClientOptions{
+		ReleaseNamespace: namespace,
+		RESTMapper:       user.RESTMapper(),
+		RESTConfig:       user.Config(),
+		WorkDir:          r.DataDir,
+	}); err == nil {
+		return hc, nil
+	} else {
+		logger.Error(err, "error creating HelmClient")
+		return nil, ErrUnhandledErrorDuringSetUp
+	}
 }
 
 // SetupWithManager sets up the controller with the Manager.

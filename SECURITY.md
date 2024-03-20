@@ -1,6 +1,6 @@
 # Security Policy
 
-Security has been Konfirm's top priority since its conception, and we remain committed to maintaining an uncompromisingly secure solution for multi-tenanted production environments.
+Security has been Konfirm's top priority since its inception, and we remain committed to maintaining an uncompromisingly secure solution for multi-tenanted production environments.
 
 ## Security Commitments
 
